@@ -5,8 +5,8 @@ Runnable from source with plain Python or as a single-file executable, from a te
 
 ## Current state
 
-**Milestones M0 (spikes), M1 (walking skeleton), M2 (lint stage), M3a (exploration), M3b (checks that need no rendering), M3c (getting past minigames) and M3d (label runs) are done. M3e (parallel processes) is next.**
-[docs/SPEC.md](docs/SPEC.md) version 0.11 is approved; the 0.12 amendments that came out of building M3d are waiting for the owner's approval (decision D16 in spec section 9.2).
+**Milestones M0 (spikes), M1 (walking skeleton), M2 (lint stage), M3a (exploration), M3b (checks that need no rendering), M3c (getting past minigames), M3d (label runs) and M3e (parallel processes) are done. M4 (translations) is next.**
+[docs/SPEC.md](docs/SPEC.md) version 0.12 is approved; the 0.13 amendments that came out of building M3e are waiting for the owner's approval (decision D17 in spec section 9.2).
 What works today: `python -m renpytester GAME` finds the game and its engine and explores every choice of every menu with no window, using in-memory snapshots, and carries on after a crash or a hang.
 While playing it checks for undefined images, missing image, audio and movie files, broken text tags and menus with nothing to choose.
 It also runs the engine's lint and turns its report into findings, merged with what playing found.
@@ -14,7 +14,8 @@ It reports on the console and in a JSON file named after the game and the time o
 It leaves the game folder byte-for-byte unchanged.
 A minigame or other interaction it cannot play is skipped, and the story is continued once for each result the script checks for; what is found after that is reported as a possible issue.
 After exploring the story it plays each label by itself, to reach what the story never reaches; what only those label runs find is a possible issue too, and is dropped if the story played the same statement without trouble.
-Not built yet: parallel processes (M3e), translations (M4), JUnit/HTML/config (M5), sandbox (M6), GUI (M7), packaging (M8).
+With `--jobs` above 1 (the default on most computers) the label runs are shared out between extra game processes and lint runs at the same time; the story itself is always explored by one process.
+Not built yet: translations (M4), JUnit/HTML/config (M5), sandbox (M6), GUI (M7), packaging (M8).
 Engine facts and hooks are recorded in [docs/SPIKES.md](docs/SPIKES.md): read it before touching the harness.
 `spikes/` holds the throwaway M0 experiments; never import from it.
 
@@ -69,6 +70,14 @@ The ones that cause real damage if forgotten:
   Every run keeps what the harness reported in `<report name>-logs/events-run.jsonl`, beside the engine's own logs.
 - **The harness must never act on the game's main menu or other out-of-story screens.**
   It once explored the main menu's buttons after an automatic script reload, which showed up as a run that intermittently found nothing.
+  The same symptom (15 paths that all end in `quit`) had a second cause: on Windows the engine enters safe mode when Shift is down as it starts, and shows its renderer screen.
+  The harness switches safe mode off; the `safe_mode` fixture reproduces it without touching the keyboard.
+- **Results must not depend on `--jobs` or on timing.**
+  Only work whose result does not depend on order may be given to another process: label runs and lint, never part of the story's exploration.
+  Findings are collected and put into the report in a fixed order when everything has finished, and everything a label run keeps in memory is reset when it starts.
+- **Game processes run at the same time, in the same game folder.**
+  Each gets its own work folder (events, saves) and log folder; nothing in the game folder may be written by more than one.
+  The engine's own second save location, `game/saves`, is switched off by the harness for that reason.
 - **A failure in our own code is never reported as a problem in the game.**
   Harness and orchestrator bugs exit with code 3 and say they are RenPyTester bugs.
 - **Nothing is rendered.** The harness replaces the engine's interaction layer, so render-time failures (missing image files, bad text tags, screen errors) never show up by themselves.
@@ -116,6 +125,7 @@ Paths to these come from environment variables.
 - Run it: `python -m renpytester GAME --sdk .cache/sdk/renpy-8.6.0-sdk` (`--sdk` is only needed for a project that has no engine of its own).
 - Tests: `python -m pytest` runs everything; `python -m pytest tests/unit` needs no engine.
   End-to-end tests use the SDK in the `RENPY_SDK` environment variable, or the newest one under `.cache/sdk/`, and are skipped if there is none.
+  The `run` fixture passes `--jobs 1` unless the test gives its own, so that results do not depend on the machine.
 - Tests on the oldest engine: set `RENPY_SDK` to `.cache/sdk/renpy-8.0.3-sdk` and run `python -m pytest` again.
   Do this for every harness change.
 - Linters: `python -m flake8 .`, `python tools/lint_rpy.py`, `npx markdownlint-cli2 "**/*.md"`.

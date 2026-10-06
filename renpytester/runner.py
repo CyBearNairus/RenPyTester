@@ -4,13 +4,15 @@ import datetime
 import re
 import shutil
 import tempfile
+import threading
+import time
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
 from renpytester import __version__, discovery, lint
 from renpytester.errors import ToolError
-from renpytester.launcher import run_command, run_engine
+from renpytester.launcher import default_jobs, run_command, run_engine
 from renpytester.model import ERROR, Finding, Report
 from renpytester.routes import Coverage, Frontier
 from renpytester.workspace import PREFIX, Workspace
@@ -20,6 +22,8 @@ ROUTES = "routes"
 STAGES = (LINT, ROUTES)
 # How many times a run starts the game again after it died or hung, before giving up on what is left.
 MAX_RELAUNCHES = 20
+# Fewer labels than this are not worth starting another game process for.
+LABELS_PER_PROCESS = 8
 # Stages the specification defines that are not built yet. They are reported as not run, never as passed.
 NOT_BUILT = ("translations", "screens")
 
@@ -35,6 +39,8 @@ class Options:
     output: str = "renpytester-report"
     strategy: str = "explore"
     labels: bool = True
+    # How many game processes may run at once; None lets the tool choose (RUN-014).
+    jobs: int | None = None
     seed: int = 0
     timeout: float = 60.0
     input_value: str = "Tester"
@@ -124,6 +130,8 @@ def startup_findings(game, run, output_dir, stage):
 def run(options, on_progress=None):
     """Runs every stage and returns the report. Raises ToolError when testing is impossible."""
     game = discovery.discover(options.game, options.sdk)
+    if options.jobs is None:
+        options.jobs = default_jobs()
 
     output_dir = Path(options.output).resolve()
     if output_dir == game.basedir or game.basedir in output_dir.parents:
@@ -132,7 +140,8 @@ def run(options, on_progress=None):
     (output_dir / "engine-logs").mkdir(parents=True, exist_ok=True)
 
     settings = {
-        "strategy": options.strategy, "labels": options.labels, "seed": options.seed, "timeout": options.timeout,
+        "strategy": options.strategy, "labels": options.labels, "jobs": options.jobs, "seed": options.seed,
+        "timeout": options.timeout,
         "input_value": options.input_value, "max_steps": options.max_steps, "max_paths": options.max_paths,
         "max_time": options.max_time, "max_depth": options.max_depth, "show_window": options.show_window,
         "fail_on": options.fail_on, "fail_on_possible": options.fail_on_possible, "stages": list(options.stages),
@@ -143,9 +152,13 @@ def run(options, on_progress=None):
     for name in NOT_BUILT:
         report.stages[name] = {"status": "not_implemented"}
 
+    progress_lock = threading.RLock()
+    cancel = threading.Event()
+
     def progress(kind, **data):
         if on_progress:
-            on_progress(kind, **data)
+            with progress_lock:
+                on_progress(kind, **data)
 
     harness_settings = {
         "strategy": options.strategy, "labels": options.labels, "seed": options.seed,
@@ -181,12 +194,24 @@ def run(options, on_progress=None):
                     "renpy_version": hello.get("renpy_version"), "python": hello.get("python"),
                     "languages": hello.get("languages", [])})
                 progress("game", game=report.game, game_kind=game.kind)
+                jobs = []
+                found = []
                 if LINT in options.stages:
                     progress("stage", name=LINT)
-                    run_lint(game, options, work_dir, output_dir, report, progress)
+                    jobs.append((run_lint, (game, options, work_dir, output_dir, report, progress)))
                 if ROUTES in options.stages:
                     progress("stage", name=ROUTES)
-                    run_routes(game, options, harness_settings, work_dir, output_dir, report, progress)
+                    jobs.append((lambda *arguments: found.append(explore_routes(*arguments)), (
+                        game, options, harness_settings, hello.get("labels"), work_dir, output_dir, report,
+                        progress, cancel)))
+                # Lint reads the script while the game is being played, unless only one process may run.
+                if options.jobs > 1:
+                    in_parallel(jobs, lambda function, arguments: function(*arguments), cancel)
+                else:
+                    for function, arguments in jobs:
+                        function(*arguments)
+                if found:
+                    finish_routes(game, options, found[0], output_dir, report)
     finally:
         report.finished = now()
 
@@ -241,101 +266,215 @@ def run_lint(game, options, work_dir, output_dir, report, progress):
     stage["findings"] = len(findings)
 
 
-def run_routes(game, options, harness_settings, work_dir, output_dir, report, progress):
-    """Plays the game, exploring its branches (spec 4.3, 4.4)."""
-    stage = report.stages[ROUTES]
-    stage["status"] = "running"
-    coverage = Coverage()
+def split_labels(labels, jobs):
+    """Shares the labels out between the game processes that play nothing but label runs.
+
+    The story is explored by one process, because what it finds depends on the order it is explored
+    in; label runs do not depend on each other (EXP-019), so they are what is spread over the other
+    processes. A process takes a few seconds to start, which is not worth it for a handful of labels.
+    """
+    workers = min(jobs - 1, -(-len(labels) // LABELS_PER_PROCESS))
+    return [labels[index::workers] for index in range(workers)] if workers > 0 else []
+
+
+class Exploration:
+    """What the game processes of one routes stage add up to. Shared between their threads."""
+
+    def __init__(self, labels):
+        self.lock = threading.RLock()
+        self.coverage = Coverage()
+        self.label_order = {name: index for index, name in enumerate(labels)}
+        self.findings = []
+        self.reasons = {}
+        self.totals = {"paths": 0, "statements": 0, "interactions": 0, "label_runs": 0, "launches": 0}
+        self.waiting = {}
+        self.limits = []
+        self.relaunches = 0
+        self.started = time.monotonic()
+
+    def collect(self, finding, lane, launch):
+        """Keeps a finding with its place in an order that does not depend on timing (NFR-001):
+        the story's findings first, then those of label runs, label by label."""
+        first = finding.path[0] if finding.path else {}
+        if first.get("kind") == "label":
+            key = (1, self.label_order.get(first.get("choice"), len(self.label_order)), lane, launch)
+        else:
+            key = (0, 0, lane, launch)
+        self.findings.append((key + (len(self.findings),), finding))
+
+    def end(self, reason, count=1):
+        self.reasons[reason] = self.reasons.get(reason, 0) + count
+
+
+def run_lane(lane, game, options, settings, exploration, work_dir, log_dir, progress, cancel):
+    """One game process exploring, started again for as long as it dies with work left (RUN-012)."""
     waiting = set()
     labels = None
-    all_labels = []
-    reasons = {}
-    totals = {"paths": 0, "statements": 0, "interactions": 0, "label_runs": 0}
-    limit = None
-    launches = 0
-    settings = harness_settings
+    launch = 0
 
     while True:
-        launches += 1
-        frontier = Frontier(coverage, waiting, labels)
+        launch += 1
+        frontier = Frontier(exploration.coverage, waiting, labels)
 
-        def on_event(event, frontier=frontier):
-            frontier.feed(event)
-            kind = event["ev"]
-            if kind == "finding":
-                progress("finding", finding=report.add(to_finding(event, ROUTES)))
-            elif kind in ("heartbeat", "path_end"):
-                progress(
-                    "step", paths=totals["paths"] + frontier.paths, waiting=len(frontier.waiting),
-                    percent=coverage.percent())
+        def on_event(event, frontier=frontier, launch=launch):
+            with exploration.lock:
+                frontier.feed(event)
+                kind = event["ev"]
+                if kind == "finding":
+                    finding = to_finding(event, ROUTES)
+                    exploration.collect(finding, lane, launch)
+                    progress("finding", finding=finding)
+                elif kind in ("heartbeat", "path_end"):
+                    if kind == "path_end":
+                        exploration.totals["paths"] += 1
+                        exploration.end(event["reason"])
+                    exploration.waiting[lane] = len(frontier.waiting)
+                    progress(
+                        "step", paths=exploration.totals["paths"], waiting=sum(exploration.waiting.values()),
+                        percent=exploration.coverage.percent())
 
+        # The time limit is for the whole stage, not for each process started during it (EXP-003).
+        left = max(options.max_time - (time.monotonic() - exploration.started), 1)
         result = run_engine(
-            game, "run", work_dir, output_dir / "engine-logs", settings, options.timeout, on_event,
-            options.show_window)
+            game, "run", work_dir, log_dir, dict(settings, max_time=left), options.timeout, on_event,
+            options.show_window, cancel)
+        if result.cancelled:
+            return
 
         bug = next((e for e in result.events if e["ev"] == "harness_error"), None)
         if bug:
             raise ToolError("error.harness_bug", message=bug.get("message"), traceback=bug.get("traceback"))
 
-        waiting = frontier.waiting
-        if labels is None and frontier.labels is not None:
-            all_labels = list(frontier.labels) + [
-                e["label"] for e in result.events if e["ev"] == "label_start" and e["label"] not in frontier.labels]
-        labels = frontier.labels
-        totals["label_runs"] += frontier.label_runs
-        totals["paths"] += frontier.paths
-        totals["statements"] += frontier.steps
-        totals["interactions"] += frontier.interactions
-        for reason, count in frontier.reasons.items():
-            reasons[reason] = reasons.get(reason, 0) + count
+        with exploration.lock:
+            waiting = frontier.waiting
+            labels = frontier.labels
+            exploration.waiting[lane] = len(waiting)
+            exploration.totals["launches"] += 1
+            exploration.totals["label_runs"] += frontier.label_runs
+            exploration.totals["statements"] += frontier.steps
+            exploration.totals["interactions"] += frontier.interactions
 
-        if frontier.done is not None:
-            limit = frontier.done.get("limit")
-            break
+            if frontier.done is not None:
+                if frontier.done.get("limit"):
+                    exploration.limits.append(frontier.done["limit"])
+                return
 
-        # The process died or was shut down without finishing.
-        findings = [] if frontier.started else startup_findings(game, result, output_dir, ROUTES)
-        if not findings:
-            if result.timed_out:
-                cls, message_id, params, trace = "hang", "finding.hang", {"seconds": int(options.timeout)}, None
-            else:
-                cls, message_id, params = "engine-crash", "finding.engine_crash", {"code": result.exit_code}
-                trace = result.output[-4000:] or None
-            findings = [Finding(
-                cls, ERROR, message_id, params, frontier.last.get("file"), frontier.last.get("line"), stage=ROUTES,
-                path=list(frontier.path), traceback=trace, possible=frontier.made_up)]
-            totals["paths"] += 1
-            reasons[cls] = reasons.get(cls, 0) + 1
-        for finding in findings:
-            progress("finding", finding=report.add(finding))
+            # The process died or was shut down without finishing.
+            findings = [] if frontier.started else startup_findings(game, result, log_dir.parent, ROUTES)
+            if not findings:
+                if result.timed_out:
+                    cls, message_id, params, trace = "hang", "finding.hang", {"seconds": int(options.timeout)}, None
+                else:
+                    cls, message_id, params = "engine-crash", "finding.engine_crash", {"code": result.exit_code}
+                    trace = result.output[-4000:] or None
+                findings = [Finding(
+                    cls, ERROR, message_id, params, frontier.last.get("file"), frontier.last.get("line"),
+                    stage=ROUTES, path=list(frontier.path), traceback=trace, possible=frontier.made_up)]
+                exploration.totals["paths"] += 1
+                exploration.end(cls)
+            for finding in findings:
+                exploration.collect(finding, lane, launch)
+                progress("finding", finding=finding)
 
-        if not waiting and not labels:
-            break
-        if launches > MAX_RELAUNCHES:
-            limit = {"kind": "relaunches", "unexplored": len(waiting), "labels": len(labels or [])}
-            break
+            if not waiting and not labels:
+                return
+            exploration.relaunches += 1
+            if exploration.relaunches > MAX_RELAUNCHES:
+                exploration.limits.append({
+                    "kind": "relaunches", "unexplored": len(waiting), "labels": len(labels or [])})
+                return
+
         # Carry on with the branches the dead process had announced but not started (RUN-012), the
         # story's own before those of label runs (EXP-011), and with the labels not yet started at.
         resume = sorted(waiting, key=lambda branch: (branch[0] or "", branch[1]))
         settings = dict(
-            harness_settings, resume=[[label, list(prefix)] for label, prefix in resume], story_done=True,
-            labels_done=[name for name in all_labels if name not in (labels or [])])
+            settings, resume=[[label, list(prefix)] for label, prefix in resume], story_done=True,
+            label_list=list(labels or []))
 
+
+def explore_routes(game, options, harness_settings, labels, work_dir, output_dir, report, progress, cancel):
+    """Plays the game, exploring its branches (spec 4.3, 4.4). Returns what was found, not yet reported."""
+    report.stages[ROUTES]["status"] = "running"
+    label_runs = options.labels and options.strategy == "explore"
+    labels = list(labels or []) if label_runs else []
+    shares = split_labels(labels, options.jobs)
+    exploration = Exploration(labels)
+    logs = Path(output_dir) / "engine-logs"
+    work_dir = Path(work_dir)
+
+    # The story's own process comes first and waits for nothing (EXP-011). With no other process to
+    # give them to, it plays the labels too, once the story is explored.
+    lanes = [(0, dict(harness_settings, label_list=[] if shares else labels), work_dir, logs)]
+    for number, share in enumerate(shares, 1):
+        name = "labels-%d" % number
+        lanes.append((
+            number, dict(harness_settings, label_list=share, story_done=True), work_dir / name, logs / name))
+    exploration.jobs = len(lanes)
+
+    def lane(number, settings, lane_work, lane_logs):
+        run_lane(number, game, options, settings, exploration, lane_work, lane_logs, progress, cancel)
+
+    in_parallel(lanes, lane, cancel)
+    return exploration
+
+
+def in_parallel(jobs, function, cancel):
+    """Runs function(*job) for each job at the same time, and raises the first error any of them raised."""
+    if len(jobs) == 1:
+        return function(*jobs[0])
+    errors = []
+
+    def guarded(job):
+        try:
+            function(*job)
+        except BaseException as error:
+            errors.append(error)
+            cancel.set()
+
+    threads = [threading.Thread(target=guarded, args=(job,), daemon=True) for job in jobs]
+    try:
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            while thread.is_alive():
+                thread.join(0.2)
+    except BaseException:
+        cancel.set()
+        for thread in threads:
+            thread.join()
+        raise
+    if errors:
+        raise errors[0]
+
+
+def finish_routes(game, options, exploration, output_dir, report):
+    """Puts what the game processes found into the report, in an order that does not depend on timing."""
+    stage = report.stages[ROUTES]
+    for _key, finding in sorted(exploration.findings, key=lambda item: item[0]):
+        report.add(finding)
+
+    totals = exploration.totals
     stage["status"] = "done"
     stage["paths"] = totals["paths"]
-    stage["end_reasons"] = dict(sorted(reasons.items()))
-    stage["launches"] = launches
+    stage["end_reasons"] = dict(sorted(exploration.reasons.items()))
+    stage["launches"] = totals["launches"]
+    stage["jobs"] = exploration.jobs
     if options.labels and options.strategy == "explore":
         stage["label_runs"] = totals["label_runs"]
     # Now that everything has been played: what real play ran without trouble is not a problem (EXP-012).
-    stage["possible_dropped"] = report.drop_unconfirmed(coverage.executed)
-    if limit:
+    stage["possible_dropped"] = report.drop_unconfirmed(exploration.coverage.executed)
+
+    if exploration.limits:
+        limit = {
+            "kind": exploration.limits[0]["kind"],
+            "unexplored": sum(i.get("unexplored") or 0 for i in exploration.limits),
+            "labels": sum(i.get("labels") or 0 for i in exploration.limits)}
         stage["limited"] = limit
-        if limit["unexplored"] or not limit.get("labels"):
+        if limit["unexplored"] or not limit["labels"]:
             report.notes.append({
                 "message_id": "note.limited." + limit["kind"], "params": {"count": limit["unexplored"]}})
-        if limit.get("labels"):
+        if limit["labels"]:
             report.notes.append({"message_id": "note.limited.labels", "params": {"count": limit["labels"]}})
-    report.coverage = coverage.report()
+    report.coverage = exploration.coverage.report()
     report.statistics.update(statements=totals["statements"], interactions=totals["interactions"])
     collect_engine_files(game, output_dir)

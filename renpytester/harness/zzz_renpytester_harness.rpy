@@ -2,7 +2,8 @@
 #
 # This file is copied into a game's game/ folder for the duration of a test run and removed
 # afterwards. If you find it in your game and no test is running, it is safe to delete.
-# It does nothing unless the RENPYTESTER_EVENTS environment variable is set.
+# It does nothing unless RenPyTester started the game: it looks for the RENPYTESTER_EVENTS and
+# RENPYTESTER_SETTINGS environment variables.
 #
 # It runs on the Python embedded in the game's engine, which can be as old as 3.9, and may only use
 # the standard library and the Ren'Py API (spec ARCH-001).
@@ -35,7 +36,7 @@ init 999 python hide:
         import renpy.error as engine_error
         import renpy.execution as execution
 
-        PROTOCOL = 3
+        PROTOCOL = 4
         HARNESS_MARK = "zzz_renpytester_"
 
         # Settings arrive in a file: a list of branches to resume can be too long for an environment variable.
@@ -52,8 +53,10 @@ init 999 python hide:
         max_depth = int(settings.get("max_depth", 500))
         heartbeat_seconds = float(settings.get("heartbeat_seconds", 1.0))
         label_runs = explore and bool(settings.get("labels", True))
-        labels_done = set(settings.get("labels_done") or [])
-        # Set when this process takes over from one that died after it had finished the story itself.
+        # The labels this process is to start at; when not given, every label that can be started at.
+        label_list = settings.get("label_list")
+        # Set when the story itself is not this process's work: another process is exploring it, or
+        # this one takes over from one that died after finishing it.
         story_done = bool(settings.get("story_done"))
 
         events = open(os.environ["RENPYTESTER_EVENTS"], "a", encoding="utf-8")
@@ -204,6 +207,7 @@ init 999 python hide:
                 "name": config.name,
                 "version": config.version,
                 "languages": sorted(i for i in renpy.known_languages() if i),
+                "labels": labels_to_start(),
             }
 
         def take_unreported():
@@ -237,8 +241,7 @@ init 999 python hide:
             """Every label a label run starts at, in script order (EXP-020)."""
             nodes = [
                 node for node in story.values()
-                if is_public_label(node) and node.name != "start" and node.name not in labels_done
-                and not needs_arguments(node)]
+                if is_public_label(node) and node.name != "start" and not needs_arguments(node)]
             nodes.sort(key=lambda n: (n.filename.replace("\\", "/"), n.linenumber, n.name))
             return [node.name for node in nodes]
 
@@ -316,8 +319,10 @@ init 999 python hide:
                 finish()
             label = state["labels"].pop(0)
             start_at(label)
-            # Each label run explores by itself, whatever was explored before it (EXP-015).
+            # Each label run explores by itself, whatever was explored before it, so that the result
+            # does not depend on which process plays which label (EXP-015).
             state["scheduled"] = set()
+            reported.clear()
             emit("label_start", label=label, path=list(state["path"]))
             to_root()
 
@@ -1008,6 +1013,8 @@ init 999 python hide:
             random.seed(seed)
             if label_runs:
                 state["labels"] = labels_to_start()
+                if label_list is not None:
+                    state["labels"] = [name for name in label_list if name in set(state["labels"])]
             emit("start", seed=seed, map=script_map(), labels=list(state["labels"]))
 
             # Handed-over paths and label runs all begin at the first statement of the story; a snapshot
@@ -1037,7 +1044,48 @@ init 999 python hide:
         if renpy.game.args.command == "run":
             emit("hello", **game_info())
 
+    def _renpytester_private_saves():
+        # The engine keeps a second copy of saves and persistent data in game/saves. Several copies of
+        # the game running at once would all write there, and trip over each other (spec RUN-015).
+        # Only the folder this process was given with --savedir is kept.
+        import os
+
+        import renpy.savelocation as savelocation
+
+        def same(a, b):
+            return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
+
+        def keep_own():
+            location = renpy.loadsave.location
+            own = [
+                i for i in getattr(location, "locations", [])
+                if getattr(i, "directory", None) and same(i.directory, config.savedir)]
+            if own:
+                location.locations = own
+
+        original_init = savelocation.init
+
+        def init(*args, **kwargs):
+            rv = original_init(*args, **kwargs)
+            keep_own()
+            return rv
+
+        savelocation.init = init
+        keep_own()
+
+    def _renpytester_no_safe_mode():
+        # On Windows the engine looks at the keyboard as it starts, and if Shift is down it shows a
+        # screen for choosing a renderer instead of the game. Someone typing a capital letter in
+        # another program at that moment is enough. Telling the engine it has already looked stops
+        # that (spec RUN-025).
+        import sys
+
+        sys.modules["renpy"].safe_mode_checked = True
+
     import os as _renpytester_os
 
+    if _renpytester_os.environ.get("RENPYTESTER_SETTINGS"):
+        _renpytester_private_saves()
+        _renpytester_no_safe_mode()
     if _renpytester_os.environ.get("RENPYTESTER_EVENTS"):
         _renpytester_install()

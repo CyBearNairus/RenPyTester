@@ -1,6 +1,8 @@
 import pytest
 
+from renpytester.model import ERROR, Finding
 from renpytester.routes import Coverage, Frontier
+from renpytester.runner import Exploration, split_labels
 
 MAP = {
     "files": {
@@ -95,3 +97,33 @@ def test_frontier_follows_label_runs():
     second = Frontier(Coverage(), frontier.waiting, frontier.labels)
     second.feed({"ev": "start", "map": MAP, "labels": []})
     assert second.labels == ["third"]
+
+
+@pytest.mark.req("RUN-014", "EXP-011")
+def test_labels_are_shared_out_between_the_processes_that_do_not_explore_the_story():
+    labels = ["label%02d" % i for i in range(20)]
+    # One process: it explores the story and then plays the labels itself.
+    assert split_labels(labels, 1) == []
+    shares = split_labels(labels, 3)
+    assert len(shares) == 2
+    assert sorted(name for share in shares for name in share) == labels
+    # A handful of labels is not worth more than one extra process.
+    assert split_labels(labels[:5], 8) == [labels[:5]]
+    assert split_labels([], 8) == []
+
+
+@pytest.mark.req("NFR-001", "EXP-015")
+def test_findings_are_put_in_an_order_that_does_not_depend_on_which_process_reported_first():
+    def finding(line, label=None):
+        path = [{"kind": "label", "choice": label}] if label else []
+        return Finding("exception", ERROR, "finding.exception", {}, "game/a.rpy", line, path=path)
+
+    def order(arrivals):
+        exploration = Exploration(["first", "second"])
+        for lane, item in arrivals:
+            exploration.collect(item, lane, 1)
+        return [f.line for _key, f in sorted(exploration.findings, key=lambda entry: entry[0])]
+
+    story, first, second = finding(1), finding(2, "first"), finding(3, "second")
+    assert order([(0, story), (0, first), (0, second)]) == [1, 2, 3]
+    assert order([(2, second), (1, first), (0, story)]) == [1, 2, 3]

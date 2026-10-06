@@ -5,7 +5,8 @@
   "cli.output": "where to write the report (default: {default})",
   "cli.stages": "which checks to run, separated by commas; available: {all} (default: {default})",
   "cli.strategy": "how to play the game: 'explore' tries every choice of every menu, 'first' plays a single path taking the first choice everywhere (default: {default})",
-  "cli.max_paths": "stop exploring after this many paths (default: {default})",
+  "cli.jobs": "how many copies of the game to run at the same time; 1 runs everything one after another (default: chosen from this computer's processor and free memory)",
+  "cli.max_paths": "stop exploring after this many paths in each copy of the game that is running (default: {default})",
   "cli.max_time": "stop exploring after this many seconds (default: {default})",
   "cli.max_depth": "stop branching after this many decisions on one path; the path is still played to its end (default: {default})",
   "cli.seed": "seed for the game's random numbers, so runs are repeatable (default: {default})",
@@ -21,6 +22,7 @@
   "cli.interrupted": "Stopped. The game folder has been restored.",
 
   "error.unknown_stage": "Unknown stage: {stages}. Available stages: {all}.",
+  "error.bad_jobs": "--jobs must be 1 or more.",
   "error.internal": "RenPyTester itself failed. This is a bug in RenPyTester, not a problem in your game. Please report it with the details below.",
   "error.path_missing": "Nothing exists at {path}.",
   "error.not_a_game": "No Ren'Py game found at {path}. Point RenPyTester at the folder that contains the 'game' folder.",

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from renpytester.launcher import SILENT_EDITOR, build_environment
+from renpytester.launcher import MAX_DEFAULT_JOBS, SILENT_EDITOR, build_environment, default_jobs
 
 
 @pytest.fixture
@@ -49,3 +49,20 @@ def test_engine_is_given_an_editor_that_opens_nothing(env, monkeypatch):
     editor.open("traceback.txt", 1)
     editor.end()
     editor.open_project("somewhere")
+
+
+@pytest.mark.req("NFR-001")
+def test_engine_orders_sets_the_same_way_on_every_run(env):
+    assert env["PYTHONHASHSEED"] == "0"
+
+
+@pytest.mark.req("RUN-014")
+def test_default_number_of_game_processes_follows_cores_and_free_memory():
+    plenty = 64 * 1024 ** 3
+    assert default_jobs(cpus=1, memory=plenty) == 1
+    assert default_jobs(cpus=4, memory=plenty) == 3
+    assert default_jobs(cpus=64, memory=plenty) == MAX_DEFAULT_JOBS
+    # Little free memory: fewer processes, but always at least one.
+    assert default_jobs(cpus=8, memory=2 * 1024 ** 3) == 2
+    assert default_jobs(cpus=8, memory=1024) == 1
+    assert default_jobs() >= 1

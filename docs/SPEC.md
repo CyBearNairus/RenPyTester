@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Version 0.11 **approved** by the project owner on 2026-10-06. Version 0.12 amendments (from building M3d) await approval. |
+| Status | Version 0.12 **approved** by the project owner on 2026-10-06. Version 0.13 amendments (from building M3e) await approval. |
 | Last updated | 2026-10-06 |
 
 This document is the source of truth for what RenPyTester does.
@@ -171,10 +171,12 @@ The harness must get through a game with no human present.
 | RUN-010 | MUST | Seed the game's random number generator so that the same command on the same game produces the same paths and findings. The seed is configurable and recorded in the report. |
 | RUN-011 | MUST | After an error on one path, continue testing other paths. One crash never ends the run. |
 | RUN-012 | MUST | If the game process dies without the harness reporting why, report an `engine-crash` finding with the process exit code and the tail of the engine's log, then relaunch and continue with the branches that were waiting to be explored. The same applies after a hang (RUN-008). After 20 relaunches in one run, exploration stops and the report says how many branches were left. |
+| RUN-025 | MUST | The engine's *safe mode* is switched off during a run. On Windows the engine enters it whenever the Shift key is down as the game starts, which someone typing in another program can cause, and then shows a screen for choosing a renderer in place of the game. |
+| RUN-026 | MUST | The engine is started with a fixed hash seed, so that sets and dictionaries are ordered the same way on every run. Without it the engine's lint lists different unreachable statements from one run to the next. |
 | RUN-023 | MUST | A project in development can reload itself when its script files change on disk. This is switched off during a run, because a reload restarts the game in the middle of a path. |
 | RUN-013 | SHOULD | Typical performance: at least 500 dialogue statements per second per game process on a mid-range desktop. |
-| RUN-014 | MUST | Explore several routes at the same time by running multiple game processes in parallel. `--jobs N` sets how many; the default is chosen from the number of CPU cores and available memory. `--jobs 1` is always supported. |
-| RUN-015 | MUST | Parallel processes do not interfere with each other: each has its own save and persistent directory and its own event file. |
+| RUN-014 | MUST | Explore several routes at the same time by running multiple game processes in parallel. `--jobs N` sets how many; the default is chosen from the number of CPU cores and available memory. `--jobs 1` is always supported. The story itself is explored by one process, because what exploration finds depends on the order it is done in (EXP-016, NFR-001); label runs, which do not depend on each other (EXP-019), are shared out between the other processes, and the engine's lint runs at the same time as both. The default is one process fewer than the computer has cores, at most 8, and no more than there is free memory for at 768 MB each. An extra process is not started for fewer than 8 labels. |
+| RUN-015 | MUST | Parallel processes do not interfere with each other: each has its own save and persistent directory, its own event file and its own engine log. The engine's second copy of saves and persistent data, which it keeps in `game/saves`, is switched off for the run. |
 | RUN-016 | MUST | Nothing in a run waits on real time: no rendering to a display, no frame-rate limit, no audio playback, no animation or transition delays (extends RUN-004). |
 
 ### 4.4 Route exploration (EXP)
@@ -188,7 +190,7 @@ Exhaustive path coverage is impossible (choices multiply), so the target is **st
 | EXP-017 | MUST | When a path comes back to a decision point it has already passed, and none of that point's options is new, the last option not yet taken on this path is chosen: a hub menu's way out is conventionally listed last, and its other options are already being explored from snapshots. |
 | EXP-018 | MUST | The game's main menu is not part of the story: when it appears during a run it is left at once, the way a player pressing *Start* would leave it, and its buttons are not explored. |
 | EXP-002 | MUST | Reach deep branches without replaying the game from the start for every path (snapshot and restore of game state at decision points). |
-| EXP-003 | MUST | Bound the work: `--max-paths` (default 5000), `--max-time` (default 600 seconds) and `--max-depth` (default 500 decisions on one path, after which the path is played to its end without branching), with defaults that finish a typical short game in minutes. When a limit stops exploration early, the report says so and gives the coverage reached. |
+| EXP-003 | MUST | Bound the work: `--max-paths` (default 5000), `--max-time` (default 600 seconds) and `--max-depth` (default 500 decisions on one path, after which the path is played to its end without branching), with defaults that finish a typical short game in minutes. When a limit stops exploration early, the report says so and gives the coverage reached. `--max-time` is for the whole stage, however many processes run and however often one is started again; `--max-paths` is for each process. |
 | EXP-004 | MUST | Record for each finding the full path that led to it. |
 | EXP-005 | MUST | Report coverage: statements executed / total, per file and per label, plus the list of labels never reached. The total counts only statements a playthrough could execute: init-time code, translation blocks, engine test cases and the implicit return at the end of each file are excluded. |
 | EXP-006 | MUST | `--strategy first` plays a single path taking the first available choice everywhere. This is the fast smoke test. When the same decision point is reached again on that path, the next untried choice is taken, so that hub menus are walked through instead of looped; when every choice there has been tried, the path ends. |
@@ -371,7 +373,7 @@ It is a front end to the same run the command line performs, not a second implem
 
 | ID | Pri | Requirement |
 | --- | --- | --- |
-| NFR-001 | MUST | **Determinism.** Same tool version, game, engine, settings and seed give the same findings and coverage, whatever the value of `--jobs`, for any run that finishes without hitting a limit (EXP-003). A run cut short by `--max-time` may differ between machines and says so in the report. |
+| NFR-001 | MUST | **Determinism.** Same tool version, game, engine, settings and seed give the same findings and coverage, whatever the value of `--jobs`, for any run that finishes without hitting a limit (EXP-003). A run cut short by `--max-time` may differ between machines and says so in the report. Findings are put into the report in a fixed order (the story's, then each label's in script order), not in the order processes reported them. |
 | NFR-002 | MUST | **No false passes.** If a stage could not run or did not finish, the run does not exit 0 claiming success; the report states what was not checked. |
 | NFR-003 | MUST | **Low false positives.** On the reference games (7.1), which are known to work, a default run reports zero findings of severity *error*. |
 | NFR-004 | MUST | **Robustness.** A bug in the harness is reported as a tool error (exit 3, "this is a RenPyTester bug"), never as a problem in the user's game. |
@@ -455,7 +457,7 @@ The harness's Python version cannot be chosen with a virtual environment, becaus
 | M3b | Checks that need no rendering (**done** 2026-10-06) | Missing files, undefined images and malformed text found while playing, not only by lint. | ERR-003–005, -008, -012, -013 |
 | M3c | Getting past minigames (**done** 2026-10-06) | Skipping unplayable interactions and continuing with inferred outcomes. | RUN-017, -019–021, -024, EXP-012–014 (the parts that concern skipped interactions) |
 | M3d | Label runs (**done** 2026-10-06) | Starting at every label, and resolving those findings against normal exploration. | EXP-007, -011–015, -019, -020 |
-| M3e | Parallel processes | Several game processes exploring at once. | RUN-014–016 |
+| M3e | Parallel processes (**done** 2026-10-06) | Several game processes exploring at once. | RUN-014–016, -025, -026 |
 | M4 | Translations | Language discovery and all TL MUSTs. | TL |
 | M5 | Reports and config | JUnit, HTML, config file, ignore rules, baseline. | REP-003–008, CFG, remaining CLI |
 | M6 | Sandbox | Cached copy with incremental synchronisation, cache commands. | SAFE-006, -007, -009–012 |
@@ -485,7 +487,7 @@ Open:
 
 | # | Question | Recommendation |
 | --- | --- | --- |
-| D16 | Approve the version 0.12 amendments: EXP-019 and EXP-020 added; EXP-007, EXP-011 and EXP-012 made precise. | Approve. |
+| D17 | Approve the version 0.13 amendments: RUN-025 and RUN-026 added; RUN-014, RUN-015, EXP-003 and NFR-001 made precise. In particular, only label runs and lint are spread over several processes; the story is explored by one. | Approve. |
 
 Settled on 2026-10-06:
 
@@ -497,6 +499,7 @@ Settled on 2026-10-06:
 | D4 | Untranslated lines are warnings. |
 | D5 | Label runs are on by default, run alongside normal exploration, and their findings are filtered against it and reported separately as possible issues (EXP-007, -011 to -015). |
 | D9 | Version 0.5 amendments approved (the owner approved and committed M1). |
+| D16 | Version 0.12 amendments approved: EXP-019 and EXP-020 added; EXP-007, EXP-011 and EXP-012 made precise. |
 | D15 | Version 0.11 amendments approved: RUN-024 added, RUN-020 made precise. |
 | D14 | Version 0.10 amendments approved: checks made while playing (ERR-012, ERR-013, ERR-008). |
 | D13 | Version 0.9 amendments approved: exploration rules (EXP-016 to EXP-018), RUN-023, and milestone M3 split into five parts. |
@@ -525,3 +528,4 @@ Settled on 2026-10-06:
 | 2026-10-06 | 0.10 | M3b built. D13 settled (0.9 approved). Added ERR-012 and ERR-013; ERR-008 exempts menus that use a set. |
 | 2026-10-06 | 0.11 | M3c built. D14 settled (0.10 approved). Added RUN-024; RUN-020 made precise. Possible issues and low-confidence coverage (EXP-012 to EXP-014) built for skipped interactions; label runs will reuse them. |
 | 2026-10-06 | 0.12 | M3d built. D15 settled (0.11 approved). Added EXP-019 (what a label run plays) and EXP-020 (which labels are started at); EXP-007, EXP-011 and EXP-012 made precise. |
+| 2026-10-06 | 0.13 | M3e built. D16 settled (0.12 approved). Added RUN-025 (no safe mode) and RUN-026 (fixed hash seed); RUN-014, RUN-015, EXP-003 and NFR-001 made precise. |

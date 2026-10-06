@@ -18,7 +18,9 @@ def run(sdk, game_copy, tmp_path, capsys):
         game = game_copy(name)
         before = folder_digest(game)
         output = tmp_path / "report"
-        code = cli.main([str(game), "--sdk", str(sdk), "--output", str(output), "--lang", "en", *extra])
+        # One game process unless the test says otherwise, so that results do not depend on the machine.
+        jobs = [] if "--jobs" in extra else ["--jobs", "1"]
+        code = cli.main([str(game), "--sdk", str(sdk), "--output", str(output), "--lang", "en", *jobs, *extra])
         text = capsys.readouterr().out
         assert folder_digest(game) == before, "the game folder was changed by the run"
         assert sorted(p.name for p in (game / "game").iterdir()) == ["script.rpy"]
@@ -42,7 +44,8 @@ def test_clean_game_passes(run):
     assert report["game"]["kind"] == "project"
     assert report["game"]["renpy_version"].startswith("8.")
     assert report["stages"]["routes"] == {
-        "status": "done", "paths": 2, "end_reasons": {"end": 2}, "launches": 1, "label_runs": 0, "possible_dropped": 0}
+        "status": "done", "paths": 2, "end_reasons": {"end": 2}, "launches": 1, "jobs": 1, "label_runs": 0,
+        "possible_dropped": 0}
     # Everything except the menu choice whose condition is never true.
     assert report["coverage"]["total"] - report["coverage"]["executed"] == 1
     assert "PASSED" in text
@@ -565,3 +568,77 @@ def test_engine_crash_in_a_label_run_does_not_stop_the_others(run):
     routes = report["stages"]["routes"]
     assert (routes["launches"], routes["label_runs"]) == (2, 3)
     assert report["coverage"]["labels"]["alpha"]["low_confidence"] == 3
+
+
+def comparable(report):
+    """The parts of a report that must not depend on how many game processes were used (NFR-001)."""
+    return report["findings"], report["coverage"], report["summary"], report["stages"]["routes"]["end_reasons"]
+
+
+@pytest.mark.req("RUN-014", "RUN-015", "EXP-015", "NFR-001")
+def test_several_game_processes_give_the_same_report_as_one(sdk, tmp_path, capsys):
+    reports = {}
+    for jobs in (1, 3):
+        output = tmp_path / ("report-%d" % jobs)
+        code = cli.main([
+            str(sdk / "tutorial"), "--sdk", str(sdk), "--output", str(output), "--lang", "en", "--jobs", str(jobs)])
+        capsys.readouterr()
+        assert code == 0
+        reports[jobs] = json.loads(next(output.glob("report-*.json")).read_text(encoding="utf-8"))
+        logs = next(output.glob("report-*-logs"))
+        # Each process keeps its own event file and its own engine log.
+        assert sorted(p.name for p in logs.iterdir() if p.is_dir()) == ["labels-%d" % i for i in range(1, jobs)]
+        for folder in (p for p in logs.iterdir() if p.is_dir()):
+            assert (folder / "events-run.jsonl").stat().st_size > 0
+
+    assert reports[1]["stages"]["routes"]["jobs"] == 1
+    assert reports[3]["stages"]["routes"]["jobs"] == 3
+    assert reports[3]["stages"]["routes"]["launches"] == 3
+    assert comparable(reports[1]) == comparable(reports[3])
+
+
+@pytest.mark.req("RUN-014", "EXP-011", "EXP-012")
+def test_label_runs_in_a_process_of_their_own_are_resolved_the_same_way(run):
+    _code, alone, _text, _game = run("labels")
+    code, together, _text, _game = run("labels", "--jobs", "2")
+    assert code == 1
+    assert together["stages"]["routes"]["jobs"] == 2
+    assert together["stages"]["routes"]["possible_dropped"] == 1
+    assert comparable(alone) == comparable(together)
+
+
+@pytest.mark.req("RUN-012", "RUN-014")
+def test_engine_crash_in_one_process_does_not_stop_the_others(run):
+    _code, alone, _text, _game = run("crash_label", "--stages", "routes")
+    code, together, _text, _game = run("crash_label", "--stages", "routes", "--jobs", "2")
+    assert code == 0
+    # The story's process, the label process that died, and the one that took over from it.
+    assert together["stages"]["routes"]["launches"] == 3
+    assert comparable(alone) == comparable(together)
+
+
+@pytest.mark.req("RUN-014", "CLI-003")
+def test_jobs_must_be_at_least_one(sdk, game_copy, tmp_path, capsys):
+    code = cli.main([str(game_copy("clean")), "--sdk", str(sdk), "--output", str(tmp_path / "out"), "--jobs", "0"])
+    assert code == 2
+    assert "--jobs" in capsys.readouterr().out
+
+
+@pytest.mark.req("RUN-004", "RUN-016")
+def test_nothing_waits_on_real_time(run):
+    import datetime
+
+    code, report, _text, _game = run("waits", "--stages", "routes")
+    assert code == 0
+    assert report["coverage"]["executed"] == report["coverage"]["total"]
+    started, finished = (datetime.datetime.fromisoformat(report[name]) for name in ("started", "finished"))
+    # The script asks for two minutes of waiting.
+    assert (finished - started).total_seconds() < 30
+
+
+@pytest.mark.req("RUN-025", "EXP-018")
+def test_engine_safe_mode_does_not_replace_the_story(run):
+    code, report, _text, _game = run("safe_mode", "--stages", "routes")
+    assert code == 0
+    assert report["stages"]["routes"]["end_reasons"] == {"end": 1}
+    assert report["coverage"]["executed"] == report["coverage"]["total"]

@@ -17,7 +17,7 @@ Adding a field does not change it, so readers should ignore fields they do not k
 | `complete` | boolean | `false` when the run was cut short. A report that is not complete proves nothing about what it does not list. |
 | `started`, `finished` | string | ISO 8601 timestamps in UTC. |
 | `game` | object | See below. |
-| `settings` | object | The settings the run used, including `seed`, so the run can be repeated. |
+| `settings` | object | The settings the run used, including `seed`, so the run can be repeated. `jobs` is the number of game processes that were allowed to run at once. |
 | `stages` | object | One entry per stage, keyed by stage name. See below. |
 | `summary` | object | Number of confirmed findings per severity (`error`, `warning`, `info`), and `possible`, the number of possible issues of any severity. |
 | `coverage` | object or null | See below. `null` when the game never started. |
@@ -67,7 +67,9 @@ The `routes` stage also has:
 - `end_reasons`: how many paths ended for each reason (`end`, `quit`, `exception`, `stuck`, `loop`, `exhausted`, `hang`, `engine-crash`, `max_time`, and `label end` for a label run that reached another label).
 - `label_runs`: how many labels were played by themselves. Absent when label runs were turned off.
 - `possible_dropped`: how many possible issues were left out of the report because the story itself played the same statement without that problem.
-- `launches`: how many times the game was started. More than one means it died or hung and exploration carried on in a new process.
+- `launches`: how many times the game was started for this stage.
+- `jobs`: how many game processes explored at the same time. When `launches` is greater than `jobs`, a process died or hung and another carried on from it.
+  The first process explores the story and keeps its logs in the log folder itself; each of the others plays label runs and keeps its logs in a subfolder named `labels-1`, `labels-2` and so on.
 - `limited`: present only when a limit stopped exploration early. It has `kind` (`max_paths`, `max_time` or `relaunches`), `unexplored`, the number of branches left, and `labels`, the number of labels not played by themselves.
 
 ## `coverage`

@@ -41,6 +41,7 @@ def build_parser():
         "--strategy", choices=["explore", "first"], default=defaults.strategy,
         help=t("cli.strategy", default=defaults.strategy))
     parser.add_argument("--no-labels", action="store_true", help=t("cli.no_labels"))
+    parser.add_argument("--jobs", type=int, metavar="N", help=t("cli.jobs"))
     parser.add_argument(
         "--max-paths", type=int, default=defaults.max_paths, metavar="N",
         help=t("cli.max_paths", default=defaults.max_paths))
@@ -94,9 +95,14 @@ def main(argv=None):
         console.write(console.paint(t(error.message_id, **error.params), ERROR))
         return error.exit_code
 
+    if args.jobs is not None and args.jobs < 1:
+        error = UsageError("error.bad_jobs")
+        console.write(console.paint(t(error.message_id, **error.params), ERROR))
+        return error.exit_code
+
     options = runner.Options(
         game=args.game, sdk=args.sdk, output=args.output, strategy=args.strategy, labels=not args.no_labels,
-        seed=args.seed,
+        jobs=args.jobs, seed=args.seed,
         timeout=args.timeout, input_value=args.input_value, max_steps=args.max_steps, max_paths=args.max_paths,
         max_time=args.max_time, max_depth=args.max_depth, show_window=args.show_window,
         fail_on=args.fail_on, fail_on_possible=args.fail_on_possible,

@@ -16,7 +16,49 @@ class EngineRun:
     events: list = field(default_factory=list)
     exit_code: int | None = None
     timed_out: bool = False
+    cancelled: bool = False
     output: str = ""
+
+
+def available_memory():
+    """Free physical memory in bytes, or None where the standard library cannot tell."""
+    try:
+        if sys.platform == "win32":
+            import ctypes
+
+            class Status(ctypes.Structure):
+                _fields_ = [("length", ctypes.c_ulong), ("load", ctypes.c_ulong)] + [
+                    (name, ctypes.c_ulonglong) for name in (
+                        "total", "available", "total_page", "available_page", "total_virtual",
+                        "available_virtual", "extended")]
+
+            status = Status()
+            status.length = ctypes.sizeof(Status)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+                return int(status.available)
+            return None
+        return os.sysconf("SC_AVPHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")
+    except (AttributeError, OSError, ValueError):
+        return None
+
+
+# What one game process is allowed for when choosing how many to run at once.
+MEMORY_PER_PROCESS = 768 * 1024 * 1024
+MAX_DEFAULT_JOBS = 8
+
+
+def default_jobs(cpus=None, memory=None):
+    """How many game processes to run at once when the user does not say (RUN-014).
+
+    One core is left for everything else on the computer, and no more processes are started than
+    there is free memory for.
+    """
+    cpus = cpus if cpus is not None else (os.cpu_count() or 1)
+    memory = memory if memory is not None else available_memory()
+    jobs = min(max(cpus - 1, 1), MAX_DEFAULT_JOBS)
+    if memory is not None:
+        jobs = min(jobs, max(int(memory // MEMORY_PER_PROCESS), 1))
+    return jobs
 
 
 def build_environment(events_file, settings, log_dir, show_window=False):
@@ -38,6 +80,9 @@ def build_environment(events_file, settings, log_dir, show_window=False):
     # No "your graphics are slow" prompt, and straight into a new game (RUN-001).
     env["RENPY_PERFORMANCE_TEST"] = "0"
     env["RENPY_SKIP_MAIN_MENU"] = "1"
+    # The same order inside sets and dictionaries on every run: the engine's lint, and any game that
+    # loops over a set, would otherwise give different results from one run to the next (NFR-001).
+    env["PYTHONHASHSEED"] = "0"
     env.pop("RENPY_SKIP_SPLASHSCREEN", None)
 
     if not show_window:
@@ -65,10 +110,17 @@ def read_new_events(handle, sink):
             pass
 
 
-def run_engine(game, command, work_dir, log_dir, settings, timeout, on_event=None, show_window=False):
-    """Runs one engine process to completion, or kills it after `timeout` seconds without an event."""
+def run_engine(game, command, work_dir, log_dir, settings, timeout, on_event=None, show_window=False, cancel=None):
+    """Runs one engine process to completion, or kills it after `timeout` seconds without an event.
+
+    Processes running at the same time must each be given a `work_dir` and a `log_dir` of their own:
+    the events file, the saves and the engine's logs live there (RUN-015). `cancel` is an event that,
+    once set, has the process shut down.
+    """
     work_dir = Path(work_dir)
     log_dir = Path(log_dir)
+    work_dir.mkdir(parents=True, exist_ok=True)
+    log_dir.mkdir(parents=True, exist_ok=True)
     events_file = work_dir / ("events-%s.jsonl" % command)
     events_file.write_text("", encoding="utf-8")
     output_file = log_dir / ("output-%s.txt" % command)
@@ -100,6 +152,9 @@ def run_engine(game, command, work_dir, log_dir, settings, timeout, on_event=Non
                             for event in result.events[before:]:
                                 on_event(event)
                         break
+                    if cancel is not None and cancel.is_set():
+                        result.cancelled = True
+                        break
                     if time.monotonic() - last_activity > timeout:
                         result.timed_out = True
                         break
@@ -128,7 +183,8 @@ def run_command(game, command, arguments, work_dir, log_dir, timeout):
     env = build_environment(work_dir / "unused.jsonl", {}, log_dir)
     del env["RENPYTESTER_EVENTS"]
 
-    saves = str(work_dir / "saves")
+    # A folder of its own: lint may run while the game is being played (RUN-015).
+    saves = str(work_dir / ("saves-" + command))
     cmd = [str(game.python), str(game.main_script), str(game.basedir), command, *arguments, "--savedir", saves]
     flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
     try:

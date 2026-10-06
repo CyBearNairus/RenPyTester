@@ -69,3 +69,13 @@ The Tutorial number is from a naive explorer that writes an event per decision a
 11. **A saved state is restored to the last hard checkpoint, then replayed forward.**
     Found while building M3d: `log.unfreeze` rolls back greedily past soft checkpoints, so a snapshot taken in a statement goes back to the statement after the last interaction.
     A label run jumps away from the story's first statement by the harness's own doing, so it marks a hard checkpoint there; without it, restoring a snapshot taken inside the label landed back at the story's start.
+12. **On Windows, Shift held down while the engine starts puts it in safe mode.**
+    Found while building M3e, from the kept logs of a test that failed once: `get_safe_mode` reads the real keyboard, even with no window.
+    The engine then shows its renderer screen in place of the game, and the harness explored that screen's 15 buttons and found nothing of the story.
+    Setting `safe_mode_checked` on the engine's top module before the interface is created stops it.
+    This was the cause of the intermittent failure first seen in M3a.
+13. **The engine keeps a second copy of saves and persistent data in `game/saves`**, whatever `--savedir` says.
+    Several processes writing it at once crashed one of them with a missing file as the game ended.
+    The save locations are a list on `renpy.loadsave.location`; the engine rebuilds it after init code on 8.6, so `renpy.savelocation.init` is wrapped.
+14. **The engine's lint depends on the order of sets.**
+    Its list of unreachable statements differed between runs of the same script until `PYTHONHASHSEED` was fixed.
