@@ -26,7 +26,8 @@ For a project that lives in the Ren'Py launcher's projects folder, add the SDK:
 python -m renpytester PATH_TO_GAME --sdk PATH_TO_RENPY_SDK
 ```
 
-The result is printed and also written to `renpytester-report/report.json`.
+The result is printed and also saved in the `renpytester-report` folder, in a file named after the game and the time of the run, such as `report-the-question-2026-10-06-143005.json`.
+Earlier reports are never overwritten.
 The exit code is 0 when no errors were found, 1 when errors were found, and 3 when the game could not be tested.
 
 Messages are in English or Brazilian Portuguese, following your system; use `--lang en` or `--lang pt-BR` to choose.

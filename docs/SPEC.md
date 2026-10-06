@@ -267,6 +267,7 @@ Translation testing MUST NOT multiply run time by the number of languages: check
 | REP-005 | MUST | Reports are written to `--output DIR` (default `./renpytester-report/`), never inside the game directory. |
 | REP-006 | MUST | Messages are written for game developers, not engine developers: say what is wrong and where in *their* script, with the raw traceback available but secondary. |
 | REP-007 | SHOULD | `--baseline REPORT.json` reports only findings that are not in an earlier report, so a project with known issues can still gate on new ones. |
+| REP-009 | MUST | Report files are named after the game and the time of the run, `report-<game name>-<yyyy-mm-dd>-<hhmmss>`, with the extension of their format, so that reports of different games, and of successive runs of one game, never overwrite each other. The game name is reduced to lowercase letters, digits and hyphens. Engine logs for the run go in a folder of the same name ending in `-logs`. The console prints the full path. |
 | REP-008 | MUST | The engine's own log, `traceback.txt` and `errors.txt` output from the run are preserved in the output directory. |
 
 ### 4.10 Command line (CLI)
@@ -466,7 +467,7 @@ Open:
 
 | # | Question | Recommendation |
 | --- | --- | --- |
-| D12 | Approve the version 0.8 amendments: LINT-002 made precise, LINT-004 and LINT-005 added. | Approve. They record how M2 was built. |
+| D12 | Approve the version 0.8 amendments: LINT-002 made precise, LINT-004 and LINT-005 added, and REP-009 (report names, requested by the owner). | Approve. They record how M2 was built. |
 
 Settled on 2026-10-06:
 
@@ -497,4 +498,4 @@ Settled on 2026-10-06:
 | 2026-10-06 | 0.5 | M1 built. EXP-006 clarified. Added RUN-018 and CLI-011. Planned structure updated to the package at the repository root. D8 settled. |
 | 2026-10-06 | 0.6 | D9 settled (0.5 approved). Added GAME-010: the engine must not open error files in a text editor. |
 | 2026-10-06 | 0.7 | Minigames and other unplayable interactions are skipped and the story continues with inferred outcomes (RUN-017 reworded, RUN-019 to RUN-022). |
-| 2026-10-06 | 0.8 | M2 built. D11 settled (0.7 approved). LINT-002 made precise; added LINT-004 and LINT-005. `--stages` (CLI-002) delivered early, in M2. |
+| 2026-10-06 | 0.8 | M2 built. D11 settled (0.7 approved). LINT-002 made precise; added LINT-004 and LINT-005. `--stages` (CLI-002) delivered early, in M2. Added REP-009: reports named after the game and the time of the run. |

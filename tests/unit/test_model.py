@@ -5,7 +5,7 @@ import pytest
 from renpytester import i18n
 from renpytester.model import ERROR, INFO, SCHEMA_VERSION, WARNING, Finding, Report
 from renpytester.report import json_report
-from renpytester.runner import load_failure, parse_errors
+from renpytester.runner import load_failure, parse_errors, report_name
 
 
 def crash(line=13, path=()):
@@ -84,3 +84,15 @@ def test_startup_traceback_becomes_a_finding():
     finding = load_failure(text, "routes")
     assert (finding.file, finding.line) == ("game/options.rpy", 12)
     assert finding.params["message"] == "NameError: name 'oops' is not defined"
+
+
+@pytest.mark.req("REP-009")
+def test_report_name_has_the_game_and_the_time():
+    import datetime
+
+    when = datetime.datetime(2026, 10, 6, 14, 30, 5)
+    assert report_name("The Question", when) == "report-the-question-2026-10-06-143005"
+    assert report_name("Ren'Py Tutorial Game!", when) == "report-ren-py-tutorial-game-2026-10-06-143005"
+    assert report_name("Coração: Édition/2", when) == "report-coracao-edition-2-2026-10-06-143005"
+    assert report_name("", when) == "report-game-2026-10-06-143005"
+    assert report_name("日本語", when) == "report-game-2026-10-06-143005"

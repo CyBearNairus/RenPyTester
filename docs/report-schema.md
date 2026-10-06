@@ -1,6 +1,7 @@
 # JSON report schema
 
-RenPyTester writes `report.json` into the output folder (spec REP-002).
+RenPyTester writes one JSON report per run into the output folder (spec REP-002).
+The file is named `report-<game name>-<yyyy-mm-dd>-<hhmmss>.json`, in local time, so earlier reports are never overwritten (spec REP-009).
 This document describes schema version 1.
 The file is UTF-8, and nothing in it depends on the interface language (spec I18N-003).
 

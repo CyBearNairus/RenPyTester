@@ -22,8 +22,8 @@ def run(sdk, game_copy, tmp_path, capsys):
         text = capsys.readouterr().out
         assert folder_digest(game) == before, "the game folder was changed by the run"
         assert sorted(p.name for p in (game / "game").iterdir()) == ["script.rpy"]
-        report_file = output / "report.json"
-        report = json.loads(report_file.read_text(encoding="utf-8")) if report_file.exists() else None
+        files = sorted(output.glob("report-*.json"), key=lambda p: p.stat().st_mtime_ns)
+        report = json.loads(files[-1].read_text(encoding="utf-8")) if files else None
         return code, report, text, game
 
     return run
@@ -88,7 +88,7 @@ def test_script_that_does_not_parse_is_reported(run, tmp_path):
     finding = report["findings"][0]
     assert (finding["class"], finding["file"], finding["line"]) == ("parse-error", "game/script.rpy", 8)
     assert report["stages"]["routes"]["status"] == "blocked"
-    assert (tmp_path / "report" / "engine-logs" / "errors.txt").is_file()
+    assert len(list((tmp_path / "report").glob("report-parse-error-*-logs/errors.txt"))) == 1
 
 
 @pytest.mark.req("RUN-008", "ERR-006")
@@ -173,7 +173,7 @@ def test_reference_games_report_no_errors(sdk, tmp_path, capsys, name):
     before = folder_digest(game)
     code = cli.main([str(game), "--sdk", str(sdk), "--output", str(tmp_path / "report"), "--lang", "en"])
     capsys.readouterr()
-    report = json.loads((tmp_path / "report" / "report.json").read_text(encoding="utf-8"))
+    report = json.loads(next((tmp_path / "report").glob("report-*.json")).read_text(encoding="utf-8"))
     assert code == 0
     assert report["summary"]["error"] == 0
     assert report["game"]["languages"]
@@ -234,3 +234,26 @@ def test_unknown_stage_is_a_usage_error(sdk, game_copy, tmp_path, capsys):
     code = cli.main([str(game), "--sdk", str(sdk), "--output", str(tmp_path / "r"), "--lang", "en", "--stages", "x"])
     assert code == 2
     assert "Unknown stage: x" in capsys.readouterr().out
+
+
+@pytest.mark.req("REP-009", "REP-005")
+def test_reports_are_named_after_the_game_and_never_overwritten(sdk, game_copy, tmp_path, capsys):
+    import re
+    import time
+
+    output = tmp_path / "reports"
+    for name in ("clean", "exception", "clean"):
+        game = game_copy(name)
+        cli.main([str(game), "--sdk", str(sdk), "--output", str(output), "--lang", "en", "--stages", "routes"])
+        time.sleep(1.1)
+    text = capsys.readouterr().out
+
+    reports = sorted(p.name for p in output.glob("*.json"))
+    assert len(reports) == 3
+    assert len([n for n in reports if n.startswith("report-clean-fixture-")]) == 2
+    assert len([n for n in reports if n.startswith("report-exception-fixture-")]) == 1
+    assert all(re.fullmatch(r"report-[a-z0-9-]+-\d{4}-\d{2}-\d{2}-\d{6}\.json", n) for n in reports)
+    for name in reports:
+        assert name in text
+        assert (output / name.replace(".json", "-logs")).is_dir()
+    assert not (output / "engine-logs").exists()

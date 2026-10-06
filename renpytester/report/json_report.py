@@ -3,11 +3,9 @@
 import json
 from pathlib import Path
 
-FILENAME = "report.json"
-
 
 def write(report, output_dir):
-    path = Path(output_dir) / FILENAME
+    path = Path(output_dir) / (report.name + ".json")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(report.to_dict(), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return path

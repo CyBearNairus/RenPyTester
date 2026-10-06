@@ -4,6 +4,7 @@ import datetime
 import re
 import shutil
 import tempfile
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -41,6 +42,19 @@ class Options:
 
 def now():
     return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+
+
+def report_name(game_name, when=None):
+    """The name a run's files are saved under: report-<game>-<date>-<time> (REP-009).
+
+    The game's name keeps reports of different games apart, and the time keeps a later run from
+    replacing an earlier one. The time is the user's local time, since it is there to be read.
+    """
+    when = when or datetime.datetime.now()
+    # Accented letters lose their accents instead of becoming gaps: "Coração" is saved as "coracao".
+    plain = unicodedata.normalize("NFKD", game_name or "").encode("ascii", "ignore").decode("ascii")
+    slug = re.sub(r"[^a-z0-9]+", "-", plain.lower()).strip("-")
+    return "report-%s-%s" % (slug[:60].strip("-") or "game", when.strftime("%Y-%m-%d-%H%M%S"))
 
 
 def parse_errors(text, stage):
@@ -166,6 +180,12 @@ def run(options, on_progress=None):
     if workspace.changed_by_game:
         report.notes.append({"message_id": "note.game_changed_files", "params": {
             "count": len(workspace.changed_by_game), "files": workspace.changed_by_game[:20]}})
+
+    # Until now the game's own name was not known, so the logs were collected under a working name.
+    report.name = report_name(report.game.get("name") or game.basedir.name)
+    logs = output_dir / (report.name + "-logs")
+    shutil.rmtree(logs, ignore_errors=True)
+    (output_dir / "engine-logs").rename(logs)
 
     report.merge_stages()
     report.complete = all(report.stages[name]["status"] in ("done", "blocked") for name in options.stages)

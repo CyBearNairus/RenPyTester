@@ -57,6 +57,8 @@ class Report:
     complete: bool = False
     started: str | None = None
     finished: str | None = None
+    # File name, without extension, that this run's report and log folder are saved under (REP-009).
+    name: str = "report"
 
     def add(self, finding):
         """Adds a finding, merging it with an identical one already present (ERR-010)."""

@@ -9,7 +9,7 @@ Runnable from source with plain Python or as a single-file executable, from a te
 [docs/SPEC.md](docs/SPEC.md) version 0.7 is approved; the 0.8 amendments that came out of building M2 are waiting for the owner's approval (decision D12 in spec section 9.2).
 What works today: `python -m renpytester GAME` finds the game and its engine and plays one path with no window.
 It also runs the engine's lint and turns its report into findings, merged with what playing found.
-It reports on the console and in `report.json`, in English or Brazilian Portuguese.
+It reports on the console and in a JSON file named after the game and the time of the run, in English or Brazilian Portuguese.
 It leaves the game folder byte-for-byte unchanged.
 Not built yet: branching exploration, snapshots and getting past minigames (M3), translations (M4), JUnit/HTML/config (M5), sandbox (M6), GUI (M7), packaging (M8).
 Engine facts and hooks are recorded in [docs/SPIKES.md](docs/SPIKES.md): read it before touching the harness.
