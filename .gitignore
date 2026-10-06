@@ -222,3 +222,6 @@ __marimo__/
 # RenPyTester: downloaded SDKs, sandbox copies, run output (never committed, spec NFR-006)
 .cache/
 renpytester-report/
+
+# Local debug script
+debug_renpytester.ps1

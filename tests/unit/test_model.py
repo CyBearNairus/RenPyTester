@@ -58,7 +58,7 @@ def test_json_report_is_complete_and_language_neutral(tmp_path):
     finding = data["findings"][0]
     expected = (
         "id", "class", "severity", "message_id", "params", "file", "line", "label", "stage", "language", "path",
-        "traceback", "count")
+        "traceback", "count", "also")
     assert set(finding) == set(expected)
     assert i18n.t(finding["message_id"], **finding["params"]).startswith("The game crashed here")
     assert i18n.t(finding["message_id"], "pt-BR", **finding["params"]).startswith("O jogo quebrou aqui")

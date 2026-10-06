@@ -7,15 +7,17 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from renpytester import __version__, discovery
+from renpytester import __version__, discovery, lint
 from renpytester.errors import ToolError
-from renpytester.launcher import run_engine
+from renpytester.launcher import run_command, run_engine
 from renpytester.model import ERROR, Finding, Report
 from renpytester.workspace import PREFIX, Workspace
 
+LINT = "lint"
 ROUTES = "routes"
+STAGES = (LINT, ROUTES)
 # Stages the specification defines that are not built yet. They are reported as not run, never as passed.
-NOT_BUILT = ("lint", "translations", "screens")
+NOT_BUILT = ("translations", "screens")
 
 PARSE_ERROR = re.compile(r'^File "(?P<file>[^"]+)", line (?P<line>\d+): (?P<message>.*)$')
 TRACEBACK_FILE = re.compile(r'File "(?P<file>game/[^"]+)", line (?P<line>\d+)')
@@ -34,6 +36,7 @@ class Options:
     max_steps: int = 200000
     show_window: bool = False
     fail_on: str = ERROR
+    stages: tuple = STAGES
 
 
 def now():
@@ -108,11 +111,11 @@ def run(options, on_progress=None):
     settings = {
         "strategy": options.strategy, "seed": options.seed, "timeout": options.timeout,
         "input_value": options.input_value, "max_steps": options.max_steps, "show_window": options.show_window,
-        "fail_on": options.fail_on,
+        "fail_on": options.fail_on, "stages": list(options.stages),
     }
     report = Report(__version__, str(game.basedir), game.kind, settings=settings, started=now())
     report.game = {"renpy_version": ".".join(str(i) for i in game.renpy_version) or None}
-    report.stages = {ROUTES: {"status": "not_run"}}
+    report.stages = {name: {"status": "not_run" if name in options.stages else "not_selected"} for name in STAGES}
     for name in NOT_BUILT:
         report.stages[name] = {"status": "not_implemented"}
 
@@ -143,14 +146,20 @@ def run(options, on_progress=None):
                     raise ToolError("error.engine_failed", code=probe.exit_code, output=probe.output[-2000:].strip())
                 for finding in findings:
                     report.add(finding)
-                report.stages[ROUTES] = {"status": "blocked"}
+                for name in options.stages:
+                    report.stages[name] = {"status": "blocked"}
             else:
                 report.game.update({
                     "name": hello.get("name"), "version": hello.get("version"),
                     "renpy_version": hello.get("renpy_version"), "python": hello.get("python"),
                     "languages": hello.get("languages", [])})
                 progress("game", game=report.game, game_kind=game.kind)
-                run_routes(game, options, harness_settings, work_dir, output_dir, report, progress)
+                if LINT in options.stages:
+                    progress("stage", name=LINT)
+                    run_lint(game, options, work_dir, output_dir, report, progress)
+                if ROUTES in options.stages:
+                    progress("stage", name=ROUTES)
+                    run_routes(game, options, harness_settings, work_dir, output_dir, report, progress)
     finally:
         report.finished = now()
 
@@ -158,8 +167,45 @@ def run(options, on_progress=None):
         report.notes.append({"message_id": "note.game_changed_files", "params": {
             "count": len(workspace.changed_by_game), "files": workspace.changed_by_game[:20]}})
 
-    report.complete = report.stages[ROUTES]["status"] in ("done", "blocked")
+    report.merge_stages()
+    report.complete = all(report.stages[name]["status"] in ("done", "blocked") for name in options.stages)
     return report
+
+
+def run_lint(game, options, work_dir, output_dir, report, progress):
+    """Runs the engine's own lint and turns its report into findings (spec 4.6)."""
+    stage = report.stages[LINT]
+    stage["status"] = "running"
+    lint_file = output_dir / "engine-logs" / "lint.txt"
+    lint_file.unlink(missing_ok=True)
+
+    # Lint reads the whole script without playing it, so it gets a time limit, not a progress watchdog.
+    timeout = max(options.timeout, 300)
+    wanted = list(lint.EXTRA_OPTIONS)
+    code, output = run_command(game, "lint", [str(lint_file), *wanted], work_dir, output_dir / "engine-logs", timeout)
+
+    rejected = lint.unrecognised_options(output)
+    if rejected and not lint_file.exists():
+        # An older engine: run again without the options it does not have, and say so (COMPAT-005).
+        wanted = [i for i in wanted if i not in rejected]
+        stage["unsupported_options"] = rejected
+        report.notes.append({"message_id": "note.lint_options", "params": {"options": ", ".join(rejected)}})
+        code, output = run_command(
+            game, "lint", [str(lint_file), *wanted], work_dir, output_dir / "engine-logs", timeout)
+
+    if not lint_file.exists():
+        stage["status"] = "failed"
+        stage["reason"] = "timeout" if code is None else "exit code %s" % code
+        report.notes.append({"message_id": "note.lint_failed", "params": {"reason": stage["reason"]}})
+        return
+
+    findings, statistics = lint.parse(lint_file.read_text(encoding="utf-8-sig", errors="replace"))
+    for finding in findings:
+        progress("finding", finding=report.add(finding))
+    if statistics:
+        report.statistics["script"] = statistics
+    stage["status"] = "done"
+    stage["findings"] = len(findings)
 
 
 def run_routes(game, options, harness_settings, work_dir, output_dir, report, progress):
@@ -207,7 +253,7 @@ def run_routes(game, options, harness_settings, work_dir, output_dir, report, pr
     else:
         stage["status"] = "done"
         report.coverage = done.get("coverage")
-        report.statistics = {"statements": done.get("steps"), "interactions": done.get("interactions")}
+        report.statistics.update(statements=done.get("steps"), interactions=done.get("interactions"))
 
     stage["paths"] = len(ends)
     stage["end_reasons"] = [e.get("reason") for e in ends]

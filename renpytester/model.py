@@ -27,6 +27,8 @@ class Finding:
     path: list = field(default_factory=list)
     traceback: str | None = None
     count: int = 1
+    # The same problem as seen by other stages: each entry has stage, class, message_id and params (LINT-002).
+    also: list = field(default_factory=list)
 
     @property
     def id(self):
@@ -66,6 +68,25 @@ class Report:
                 return existing
         self.findings.append(finding)
         return finding
+
+    def merge_stages(self):
+        """Folds a static finding into a finding another stage made at the same place (LINT-002, ERR-010).
+
+        Lint and a playthrough often report one mistake twice: lint from reading the line, the
+        playthrough from crashing on it. The playthrough's finding is kept, because it carries the
+        path and the traceback, and lint's wording is attached to it.
+        """
+        played = {(f.file, f.line): f for f in self.findings if f.stage != "lint" and f.severity == ERROR and f.file}
+        kept = []
+        for finding in self.findings:
+            twin = played.get((finding.file, finding.line))
+            if finding.stage == "lint" and finding.severity == ERROR and twin is not None:
+                twin.also.append({
+                    "stage": finding.stage, "class": finding.cls, "message_id": finding.message_id,
+                    "params": finding.params})
+            else:
+                kept.append(finding)
+        self.findings = kept
 
     def count(self, severity):
         return sum(1 for f in self.findings if f.severity == severity)

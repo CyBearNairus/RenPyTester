@@ -5,12 +5,13 @@ Runnable from source with plain Python or as a single-file executable, from a te
 
 ## Current state
 
-**Milestones M0 (spikes) and M1 (walking skeleton) are done. Milestone M2 (lint stage) is next.**
-[docs/SPEC.md](docs/SPEC.md) version 0.6 is approved; the 0.7 amendments (getting past minigames, built in M3) are waiting for the owner's approval (decision D11 in spec section 9.2).
+**Milestones M0 (spikes), M1 (walking skeleton) and M2 (lint stage) are done. Milestone M3 (exploration) is next.**
+[docs/SPEC.md](docs/SPEC.md) version 0.7 is approved; the 0.8 amendments that came out of building M2 are waiting for the owner's approval (decision D12 in spec section 9.2).
 What works today: `python -m renpytester GAME` finds the game and its engine and plays one path with no window.
-It reports crashes and script errors on the console and in `report.json`, in English or Brazilian Portuguese.
+It also runs the engine's lint and turns its report into findings, merged with what playing found.
+It reports on the console and in `report.json`, in English or Brazilian Portuguese.
 It leaves the game folder byte-for-byte unchanged.
-Not built yet: branching exploration and snapshots (M3), lint (M2), translations (M4), JUnit/HTML/config (M5), sandbox (M6), GUI (M7), packaging (M8).
+Not built yet: branching exploration, snapshots and getting past minigames (M3), translations (M4), JUnit/HTML/config (M5), sandbox (M6), GUI (M7), packaging (M8).
 Engine facts and hooks are recorded in [docs/SPIKES.md](docs/SPIKES.md): read it before touching the harness.
 `spikes/` holds the throwaway M0 experiments; never import from it.
 
@@ -111,7 +112,7 @@ Paths to these come from environment variables.
 
 - `renpytester/`: the orchestrator.
   `cli` parses options, `discovery` finds the game and engine, `workspace` prepares and restores the game folder, and `launcher` runs the engine invisibly.
-  `runner` ties a run together, `model` holds findings and the report, `i18n` and `locale/` hold every user-facing string, and `report/` writes output.
+  `lint` reads the engine's lint report, `runner` ties a run together, `model` holds findings and the report, `i18n` and `locale/` hold every user-facing string, and `report/` writes output.
 - `renpytester/harness/zzz_renpytester_harness.rpy`: the script injected into the game.
 - `tests/fixtures/games/`: one small game per behaviour under test. A new finding class needs a new fixture.
 - `docs/report-schema.md`: the JSON report format. Update it with any change to `model.py`.

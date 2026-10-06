@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Version 0.6 **approved** by the project owner on 2026-10-06. Version 0.7 amendments (getting past minigames) await approval. |
+| Status | Version 0.7 **approved** by the project owner on 2026-10-06. Version 0.8 amendments (from building M2) await approval. |
 | Last updated | 2026-10-06 |
 
 This document is the source of truth for what RenPyTester does.
@@ -225,7 +225,9 @@ Every finding MUST carry: a stable ID, class, severity, message, script file and
 | ID | Pri | Requirement |
 | --- | --- | --- |
 | LINT-001 | MUST | Run the engine's built-in lint and convert its output into findings, with file and line where lint provides them. Each kind of lint message is mapped to a severity; lint's own exit code is not used, because it reports informational items such as unreachable statements as failures. |
-| LINT-002 | MUST | Lint findings that duplicate a finding from another stage are merged with it (ERR-010). |
+| LINT-002 | MUST | Lint findings that duplicate a finding from another stage are merged with it (ERR-010). A lint error at the same file and line as an error found by playing is the same problem: the played finding is kept, because it has the path and the traceback, and lint's wording is attached to it. |
+| LINT-004 | MUST | Lint is asked for everything it can report (all problems, unclosed text tags). An engine version that lacks one of these options is run without it, and the report says which checks were skipped (COMPAT-005). |
+| LINT-005 | MUST | Unreachable statements and orphan translations reported by lint are findings of severity *info* (ERR-007, TL-007). A kind of lint message the tool does not recognise is a *warning*, never an error. |
 | LINT-003 | SHOULD | Include lint's statistics (word count, dialogue blocks, per-language counts) in the report summary. |
 
 ### 4.7 Translation testing (TL)
@@ -433,7 +435,7 @@ The harness's Python version cannot be chosen with a virtual environment, becaus
 | --- | --- | --- | --- |
 | M0 | Feasibility spikes (**done** 2026-10-06) | Throwaway experiments answering the assumptions in 9.1, on the oldest and newest Ren'Py 8.x. Results in [SPIKES.md](SPIKES.md). | — |
 | M1 | Walking skeleton (**done** 2026-10-06) | Discover, launch invisibly, inject, clean up, play one path (`--strategy first`), catch exceptions, console + JSON report. Message catalogue in both languages from the first message onward. | GAME-001–007, I18N-001–006, SAFE-001–005, RUN-001–005, -007, -008, -011, EXP-006, ERR-001, -002, REP-001, -002, CLI-001, -003 |
-| M2 | Lint | Lint stage and finding merge. | LINT, ERR-010 |
+| M2 | Lint (**done** 2026-10-06) | Lint stage and finding merge. | LINT, ERR-010 |
 | M3 | Exploration | Coverage-guided branching, snapshots, parallel processes, label runs and their resolution, limits, coverage report, custom screens, getting past minigames. | EXP-001–005, -007, -011–015, RUN-006, -017, -019–021, -009, -010, -012, -014–016, ERR-003–006 |
 | M4 | Translations | Language discovery and all TL MUSTs. | TL |
 | M5 | Reports and config | JUnit, HTML, config file, ignore rules, baseline. | REP-003–008, CFG, remaining CLI |
@@ -464,7 +466,7 @@ Open:
 
 | # | Question | Recommendation |
 | --- | --- | --- |
-| D11 | Approve the version 0.7 amendments: RUN-017 reworded, RUN-019 to RUN-022. Requested by the owner: get past minigames by working out what the story needs next, not by playing them. | Approve. Built in M3, with the config override (RUN-022) in M5. |
+| D12 | Approve the version 0.8 amendments: LINT-002 made precise, LINT-004 and LINT-005 added. | Approve. They record how M2 was built. |
 
 Settled on 2026-10-06:
 
@@ -476,6 +478,7 @@ Settled on 2026-10-06:
 | D4 | Untranslated lines are warnings. |
 | D5 | Label runs are on by default, run alongside normal exploration, and their findings are filtered against it and reported separately as possible issues (EXP-007, -011 to -015). |
 | D9 | Version 0.5 amendments approved (the owner approved and committed M1). |
+| D11 | Version 0.7 amendments approved: minigames are skipped and the story continues with inferred outcomes (RUN-017, RUN-019 to RUN-022). |
 | D10 | Error files must not open in a text editor during a run (GAME-010), requested by the owner after seeing it happen during development. |
 | D8 | Version 0.4 amendments approved (the owner committed M0 and asked for M1). |
 | D6 | The HTML report is required for 1.0 and must be concise (REP-004). |
@@ -494,3 +497,4 @@ Settled on 2026-10-06:
 | 2026-10-06 | 0.5 | M1 built. EXP-006 clarified. Added RUN-018 and CLI-011. Planned structure updated to the package at the repository root. D8 settled. |
 | 2026-10-06 | 0.6 | D9 settled (0.5 approved). Added GAME-010: the engine must not open error files in a text editor. |
 | 2026-10-06 | 0.7 | Minigames and other unplayable interactions are skipped and the story continues with inferred outcomes (RUN-017 reworded, RUN-019 to RUN-022). |
+| 2026-10-06 | 0.8 | M2 built. D11 settled (0.7 approved). LINT-002 made precise; added LINT-004 and LINT-005. `--stages` (CLI-002) delivered early, in M2. |

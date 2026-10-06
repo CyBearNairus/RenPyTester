@@ -20,7 +20,7 @@ Adding a field does not change it, so readers should ignore fields they do not k
 | `stages` | object | One entry per stage, keyed by stage name. See below. |
 | `summary` | object | Number of findings per severity: `error`, `warning`, `info`. |
 | `coverage` | object or null | See below. `null` when the game never started. |
-| `statistics` | object | `statements` and `interactions` executed. |
+| `statistics` | object | `statements` and `interactions` executed, and `script`: what lint counted (see below). |
 | `notes` | array | Things worth knowing that are not problems in the game. Each has `message_id` and `params`. |
 | `findings` | array | See below. Sorted by severity, then file, then line. |
 
@@ -35,6 +35,16 @@ Adding a field does not change it, so readers should ignore fields they do not k
 | `python` | string | The version of the Python inside the engine. |
 | `languages` | array of strings | Languages the game has translations for. |
 
+## `statistics.script`
+
+Present when the lint stage ran.
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `dialogue` | object | `blocks`, `words` and `characters` of dialogue in the game's own language. |
+| `menus`, `images`, `screens` | integer | How many the game defines. |
+| `translations` | object | For each language, the same three counts as `dialogue`. |
+
 ## `stages`
 
 Each stage has a `status`:
@@ -44,7 +54,11 @@ Each stage has a `status`:
 | `done` | The stage ran to its end. |
 | `blocked` | The stage could not run because of a problem in the game, which is listed in `findings`. |
 | `not_run` | The stage did not run. |
+| `not_selected` | The stage was left out with `--stages`. |
+| `failed` | The stage could not finish, for a reason given in `reason`. The report is then not complete. |
 | `not_implemented` | This version of RenPyTester does not have the stage yet. It was not checked. |
+
+The `lint` stage also has `findings` (how many it produced) and, on engine versions that lack some lint checks, `unsupported_options`.
 
 The `routes` stage also has `paths` (number of paths played) and `end_reasons` (why each one ended: `end`, `quit`, `exception`, `stuck`, `loop`, `exhausted`).
 
@@ -71,6 +85,7 @@ The `routes` stage also has `paths` (number of paths played) and `end_reasons` (
 | `path` | array | The decisions that led here, in order. Each has `kind` (`menu`, `screen` or `input`), `file`, `line`, `choice` (the text chosen or typed) and `index`. |
 | `traceback` | string or null | The engine's traceback, when there is one. |
 | `count` | integer | How many times this problem was reached. |
+| `also` | array | The same problem as other stages reported it. Each entry has `stage`, `class`, `message_id` and `params`. |
 
 ## Finding classes
 
@@ -83,3 +98,11 @@ The `routes` stage also has `paths` (number of paths played) and `end_reasons` (
 | `engine-crash` | error | The engine process ended without explanation. |
 | `stuck` | warning | The game waited for something the tool cannot do, such as a minigame. |
 | `loop` | warning | A path ran past the statement limit without ending. |
+| `undefined-image` | error | Lint: an image is shown that was never defined. |
+| `missing-file` | error | Lint: a file the script uses cannot be loaded. |
+| `missing-label` | error | Lint: a jump or call names a label that does not exist. |
+| `bad-text` | error | Lint: a text tag is unknown or was never closed. |
+| `undefined-name` | error | Lint: a name, such as a character, was never defined. |
+| `lint` | warning | Lint: a kind of problem this tool does not classify. The message is lint's own. |
+| `unreachable` | info | Lint: a statement no path can reach. |
+| `orphan-translation` | info | Lint: a translation whose original line no longer exists. |

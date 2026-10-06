@@ -178,3 +178,59 @@ def test_reference_games_report_no_errors(sdk, tmp_path, capsys, name):
     assert report["summary"]["error"] == 0
     assert report["game"]["languages"]
     assert folder_digest(game) == before
+
+
+@pytest.mark.req("LINT-001", "ERR-003", "ERR-004", "ERR-005", "CLI-002")
+def test_lint_finds_problems_the_story_never_reaches(run):
+    code, report, text, _game = run("lint_problems")
+    assert code == 1
+    found = {(f["line"], f["class"]) for f in report["findings"]}
+    assert found == {
+        (17, "undefined-image"), (19, "bad-text"), (21, "bad-text"), (23, "missing-file"), (25, "missing-label"),
+        (28, "undefined-name")}
+    assert all(f["stage"] == "lint" and f["severity"] == "error" for f in report["findings"])
+    assert all(f["file"] == "game/script.rpy" for f in report["findings"])
+    assert report["stages"]["lint"]["status"] == "done"
+    assert "game/script.rpy:17" in text
+
+
+@pytest.mark.req("LINT-003")
+def test_lint_statistics_are_in_the_report(run):
+    _code, report, text, _game = run("lint_problems")
+    script = report["statistics"]["script"]
+    assert script["dialogue"] == {"blocks": 4, "words": 27, "characters": 157}
+    assert (script["menus"], script["images"], script["screens"]) == (0, 1, 0)
+    assert "27 words" in text
+
+
+@pytest.mark.req("LINT-002", "ERR-010")
+def test_mistake_found_by_lint_and_by_playing_is_reported_once(run):
+    code, report, text, _game = run("missing_label")
+    assert code == 1
+    assert len(report["findings"]) == 1
+    finding = report["findings"][0]
+    assert (finding["stage"], finding["class"], finding["line"]) == ("routes", "exception", 8)
+    assert [(other["stage"], other["class"]) for other in finding["also"]] == [("lint", "missing-label")]
+    assert "also reported by lint" in text
+
+
+@pytest.mark.req("CLI-002")
+def test_stages_can_be_selected(run):
+    code, report, _text, _game = run("lint_problems", "--stages", "routes")
+    assert code == 0
+    assert report["findings"] == []
+    assert report["stages"]["lint"]["status"] == "not_selected"
+    assert report["settings"]["stages"] == ["routes"]
+
+    code, report, _text, _game = run("exception", "--stages", "lint")
+    assert code == 0
+    assert report["stages"]["routes"]["status"] == "not_selected"
+    assert report["coverage"] is None
+
+
+@pytest.mark.req("CLI-002", "CLI-003")
+def test_unknown_stage_is_a_usage_error(sdk, game_copy, tmp_path, capsys):
+    game = game_copy("clean")
+    code = cli.main([str(game), "--sdk", str(sdk), "--output", str(tmp_path / "r"), "--lang", "en", "--stages", "x"])
+    assert code == 2
+    assert "Unknown stage: x" in capsys.readouterr().out

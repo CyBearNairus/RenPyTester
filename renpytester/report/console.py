@@ -31,6 +31,7 @@ class Console:
         self.bar_shown = False
         self.last_line = time.monotonic()
         self.findings = 0
+        self.stage = ""
 
     def paint(self, text, colour):
         return "\033[%sm%s\033[0m" % (COLOURS[colour], text) if self.colour else text
@@ -54,6 +55,9 @@ class Console:
             self.write(t("console.engine", renpy=game.get("renpy_version") or "?", kind=t("kind." + data["game_kind"])))
             languages = game.get("languages") or []
             self.write(t("console.languages", count=len(languages), names=", ".join(languages) or "-"))
+        elif kind == "stage":
+            self.stage = t("console.stage." + data["name"])
+            self.status(self.stage, force=True)
         elif kind == "note":
             self.write(t(data["message_id"], **data["params"]))
         elif kind == "finding":
@@ -61,12 +65,12 @@ class Console:
         elif kind == "step":
             self.status(t("console.progress", steps=data.get("steps") or 0, findings=self.findings))
 
-    def status(self, text):
+    def status(self, text, force=False):
         if self.live:
             self.stream.write("\r\033[K" + text[:100])
             self.stream.flush()
             self.bar_shown = True
-        elif time.monotonic() - self.last_line > 5:
+        elif force or time.monotonic() - self.last_line > 5:
             # Not a terminal (a CI log): occasional plain lines instead of a bar.
             self.last_line = time.monotonic()
             self.write(text)
@@ -92,6 +96,9 @@ class Console:
                     self.write("      " + self.paint(t("console.path", path=shown), "dim"))
                 if finding.count > 1:
                     self.write("      " + self.paint(t("console.count", count=finding.count), "dim"))
+                for other in finding.also:
+                    text = t("console.also", stage=other["stage"], message=t(other["message_id"], **other["params"]))
+                    self.write("      " + self.paint(text, "dim"))
             self.write()
 
         for note in report.notes:
@@ -101,6 +108,12 @@ class Console:
         if report.coverage and report.coverage.get("total"):
             executed, total = report.coverage["executed"], report.coverage["total"]
             self.write(t("console.coverage", executed=executed, total=total, percent=round(100 * executed / total)))
+
+        script = report.statistics.get("script", {})
+        if script.get("dialogue"):
+            self.write(t(
+                "console.script", words=script["dialogue"]["words"], blocks=script["dialogue"]["blocks"],
+                menus=script.get("menus", 0), languages=len(script.get("translations", {}))))
 
         not_run = [name for name, stage in report.stages.items() if stage["status"] == "not_implemented"]
         if not_run:

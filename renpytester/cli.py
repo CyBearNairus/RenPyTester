@@ -5,7 +5,7 @@ import sys
 import traceback
 
 from renpytester import __version__, i18n, runner
-from renpytester.errors import ToolError
+from renpytester.errors import ToolError, UsageError
 from renpytester.i18n import t
 from renpytester.model import ERROR, SEVERITIES
 from renpytester.report import json_report
@@ -34,6 +34,9 @@ def build_parser():
     parser.add_argument("--sdk", metavar="PATH", help=t("cli.sdk"))
     parser.add_argument(
         "--output", metavar="DIR", default=defaults.output, help=t("cli.output", default=defaults.output))
+    parser.add_argument(
+        "--stages", metavar="LIST", default=",".join(defaults.stages),
+        help=t("cli.stages", default=",".join(defaults.stages), all=", ".join(runner.STAGES)))
     parser.add_argument("--strategy", choices=["first"], default=defaults.strategy, help=t("cli.strategy"))
     parser.add_argument("--seed", type=int, default=defaults.seed, help=t("cli.seed", default=defaults.seed))
     parser.add_argument(
@@ -71,10 +74,17 @@ def main(argv=None):
     args = build_parser().parse_args(argv)
     console = Console()
 
+    stages = tuple(i.strip() for i in args.stages.split(",") if i.strip())
+    unknown = [i for i in stages if i not in runner.STAGES]
+    if unknown or not stages:
+        error = UsageError("error.unknown_stage", stages=", ".join(unknown) or "-", all=", ".join(runner.STAGES))
+        console.write(console.paint(t(error.message_id, **error.params), ERROR))
+        return error.exit_code
+
     options = runner.Options(
         game=args.game, sdk=args.sdk, output=args.output, strategy=args.strategy, seed=args.seed,
         timeout=args.timeout, input_value=args.input_value, max_steps=args.max_steps, show_window=args.show_window,
-        fail_on=args.fail_on)
+        fail_on=args.fail_on, stages=tuple(i for i in runner.STAGES if i in stages))
 
     if options.show_window:
         console.write(console.paint(t("cli.show_window_warning"), "warning"))

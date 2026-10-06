@@ -3,6 +3,7 @@
 Test all routes on a RenPy game to ensure it's working properly.
 
 RenPyTester plays through a Ren'Py game by itself, with no window on screen, and reports crashes and script errors with the file and line where they happened.
+It also runs Ren'Py's own lint, so problems in scenes the playthrough did not reach, such as a missing image or a jump to a label that does not exist, are reported too.
 It works on any Ren'Py 8 game, built or in development, and leaves the game folder exactly as it found it.
 
 This is an early version: it plays one path through the game.
