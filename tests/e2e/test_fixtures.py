@@ -1070,3 +1070,135 @@ def test_interface_language_can_be_set_in_the_settings_file(sdk, game_copy, tmp_
     # The command line still has the last word.
     assert cli.main([*arguments, "--lang", "en"]) == 1
     assert "The game crashed here" in capsys.readouterr().out
+
+
+# ------------------------------------------------------------- sandbox (spec 4.2, M6)
+
+WRITTEN = "game/data/counter.txt, game/data/old_notes.txt, game/data/visit_log.txt"
+
+
+@pytest.mark.req("SAFE-007")
+def test_files_the_game_writes_in_its_own_folder_are_reported(sdk, game_copy, tmp_path, capsys):
+    game = game_copy("writes_files")
+    code = cli.main([str(game), "--sdk", str(sdk), "--output", str(tmp_path / "report"), "--lang", "en", "--jobs", "1"])
+    text = capsys.readouterr().out
+    report = json.loads(next((tmp_path / "report").glob("report-*.json")).read_text(encoding="utf-8"))
+    assert code == 0
+    assert report["findings"] == []
+    assert report["game_wrote"] == {
+        "created": ["game/data/visit_log.txt"], "changed": ["game/data/counter.txt"],
+        "deleted": ["game/data/old_notes.txt"]}
+    assert report["notes"][-1] == {"message_id": "note.game_wrote_files", "params": {
+        "created": 1, "changed": 1, "deleted": 1, "files": WRITTEN}}
+    assert "Use --sandbox to test a copy of the game instead." in text
+    # In place, what the game created is removed again; the rest cannot be put back, as the note says.
+    data = game / "game" / "data"
+    assert sorted(p.name for p in data.iterdir()) == ["counter.txt"]
+    assert "one more visit" in (data / "counter.txt").read_text(encoding="utf-8")
+    assert sorted(p.name for p in (game / "game").iterdir()) == ["data", "script.rpy"]
+
+
+@pytest.mark.req("SAFE-006", "SAFE-009", "SAFE-010", "SAFE-012")
+def test_sandbox_tests_a_copy_and_never_writes_to_the_game(run, own_cache):
+    # The run fixture checks that the game folder is byte-for-byte what it was.
+    code, report, text, game = run("writes_files", "--sandbox")
+    assert code == 0
+    assert report["findings"] == []
+    assert report["complete"] is True
+    assert report["game"]["path"] == str(game)
+    assert report["game"]["name"] == "Writing Fixture"
+    assert report["settings"]["sandbox"] is True
+
+    box = report["sandbox"]
+    copy = own_cache / "sandbox"
+    assert box["path"].startswith(str(copy)) and box["path"].endswith("copy")
+    assert (box["copied"], box["removed"], box["verified"]) == (3, 0, False)
+    # The game deleted one of its three files in the copy; what it created was cleaned away.
+    assert box["files"] == 2 and box["bytes"] > 0
+    assert report["notes"][-1] == {"message_id": "note.game_wrote_files.sandbox", "params": {
+        "created": 1, "changed": 1, "deleted": 1, "files": WRITTEN}}
+    assert "A copy of the game was tested, and the game itself was not touched." in text
+    assert "3 files were copied and 0 removed" in text
+    assert "Use --sandbox" not in text
+    # Nothing of the tool's is left in the copy either.
+    assert not [p for p in (copy.rglob("*")) if "zzz_renpytester_" in p.name]
+
+
+@pytest.mark.req("SAFE-009", "SAFE-010", "SAFE-011")
+def test_second_sandbox_run_copies_only_what_changed_in_between(sdk, game_copy, tmp_path, capsys):
+    game = game_copy("writes_files")
+
+    def sandbox_run(*extra):
+        code = cli.main([
+            str(game), "--sdk", str(sdk), "--output", str(tmp_path / "report"), "--lang", "en", "--jobs", "1",
+            "--stages", "routes", "--sandbox", *extra])
+        capsys.readouterr()
+        files = sorted((tmp_path / "report").glob("report-*.json"), key=lambda p: p.stat().st_mtime_ns)
+        report = json.loads(files[-1].read_text(encoding="utf-8"))
+        assert code == 0
+        return report["sandbox"]
+
+    before = folder_digest(game)
+    assert sandbox_run()["copied"] == 3
+    # Nothing changed in the game: only the two files the game altered in the copy are put back.
+    assert (sandbox_run()["copied"], folder_digest(game)) == (2, before)
+
+    script = game / "game" / "script.rpy"
+    script.write_text(script.read_text(encoding="utf-8") + "\n# Edited between runs.\n", encoding="utf-8")
+    (game / "game" / "data" / "old_notes.txt").unlink()
+    (game / "game" / "data" / "new_notes.txt").write_text("added between runs", encoding="utf-8")
+    after_edit = folder_digest(game)
+    # The edited script, the new file, and the one file the game altered that is still in the game.
+    box = sandbox_run()
+    assert (box["copied"], box["removed"], folder_digest(game)) == (3, 0, after_edit)
+
+    # Comparing contents gives the same answer, and says that it did.
+    box = sandbox_run("--sandbox-verify")
+    assert (box["copied"], box["verified"]) == (1, True)
+
+
+@pytest.mark.req("SAFE-006", "SAFE-011", "ERR-002")
+def test_problems_found_in_the_copy_are_reported_as_the_games(run):
+    code, report, text, game = run("exception", "--stages", "routes", "--sandbox-verify")
+    assert code == 1
+    # Asking for contents to be compared is asking for the sandbox.
+    assert (report["settings"]["sandbox"], report["sandbox"]["verified"]) == (True, True)
+    finding = report["findings"][0]
+    assert (finding["class"], finding["file"], finding["line"]) == ("exception", "game/script.rpy", 13)
+    assert report["game"]["path"] == str(game)
+    assert report["name"].startswith("report-exception-fixture-")
+    assert "game/script.rpy:13" in text
+
+
+@pytest.mark.req("RUN-014", "RUN-015", "SAFE-006", "SAFE-007")
+def test_several_processes_share_the_one_copy_and_the_report_says_what_that_can_mean(run):
+    code, report, _text, _game = run("writes_files", "--sandbox", "--jobs", "3")
+    assert code == 0
+    assert report["findings"] == []
+    assert [note["message_id"] for note in report["notes"]][-2:] == [
+        "note.game_wrote_files.sandbox", "note.game_wrote_files.jobs"]
+
+
+@pytest.mark.req("SAFE-012")
+def test_cached_copies_can_be_listed_and_cleared(run, capsys, own_cache):
+    _code, _report, _text, first = run("writes_files", "--sandbox", "--stages", "routes")
+    _code, _report, _text, second = run("clean", "--sandbox", "--stages", "routes")
+    capsys.readouterr()
+
+    assert cli.main(["cache", "list", "--lang", "en"]) == 0
+    text = capsys.readouterr().out
+    assert "Copies of games are kept in %s" % own_cache in text
+    assert str(first) in text and str(second) in text
+    assert "2 copies," in text
+
+    assert cli.main(["cache", "clear", str(second / "game"), "--lang", "en"]) == 0
+    assert "Deleted 1 copies" in capsys.readouterr().out
+    assert cli.main(["cache", "list", "--lang", "en"]) == 0
+    text = capsys.readouterr().out
+    assert str(first) in text and str(second) not in text
+
+    assert cli.main(["cache", "clear", "--lang", "en"]) == 0
+    assert "Deleted 1 copies" in capsys.readouterr().out
+    assert cli.main(["cache", "list", "--lang", "en"]) == 0
+    assert "There are none." in capsys.readouterr().out
+    assert not list((own_cache / "sandbox").iterdir())

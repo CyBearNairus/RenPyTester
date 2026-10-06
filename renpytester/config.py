@@ -81,6 +81,8 @@ SETTINGS = {
     "fail_on": (_one_of(FAIL_ON), "config.expected.fail_on"),
     "fail_on_possible": (_flag, "config.expected.flag"),
     "show_window": (_flag, "config.expected.flag"),
+    "sandbox": (_flag, "config.expected.flag"),
+    "sandbox_verify": (_flag, "config.expected.flag"),
 }
 OTHER = {
     "lang": (lambda value: _text(value) and i18n.normalise(value) is not None, "config.expected.lang"),

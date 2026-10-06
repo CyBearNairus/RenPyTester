@@ -67,6 +67,10 @@ class Report:
     name: str = "report"
     # True when the user stopped the run before it finished (CLI-006).
     interrupted: bool = False
+    # The copy of the game that was tested, when the run used one: where it is and how big (SAFE-012).
+    sandbox: dict | None = None
+    # Files the game's own script created, changed or deleted in its folder (SAFE-007), or None.
+    game_wrote: dict | None = None
     # Findings left out because an ignore rule matched them, in all and for each rule (CFG-003).
     ignored: int = 0
     ignored_by: list = field(default_factory=list)
@@ -195,6 +199,8 @@ class Report:
             "started": self.started,
             "finished": self.finished,
             "game": {"path": self.game_path, "kind": self.game_kind, **self.game},
+            "sandbox": self.sandbox,
+            "game_wrote": self.game_wrote,
             "settings": self.settings,
             "stages": self.stages,
             "summary": {

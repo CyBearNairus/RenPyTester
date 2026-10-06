@@ -94,6 +94,11 @@ def engine_rewrites(relative):
     return parts[1] in ("cache", "saves") or relative.endswith(COMPILED) or relative.endswith(SCRIPTS)
 
 
+def made_by_tool_or_engine(relative):
+    """True for files that appear in a game folder during a run without the game's script writing them."""
+    return PREFIX in relative or engine_rewrites(relative) or relative.endswith((".pyc", ".pyo"))
+
+
 class Workspace:
     """Context manager: the game folder is ready for testing inside, and untouched outside."""
 
@@ -102,7 +107,9 @@ class Workspace:
         self.run_dir = self.basedir / RUN_DIR
         self.state_file = self.run_dir / "state.json"
         self.repaired = False
-        self.changed_by_game = []
+        # Files the game's own script created, changed or deleted in its folder during the run
+        # (SAFE-007). The created ones are removed again; the others cannot be put back.
+        self.game_wrote = {"created": [], "changed": [], "deleted": []}
         self.active = False
 
     # ------------------------------------------------------------------------------ entering
@@ -157,15 +164,21 @@ class Workspace:
             return False
         self.active = False
         state = json.loads(self.state_file.read_text(encoding="utf-8"))
-        self.changed_by_game = self.restore(state)
+        self.game_wrote = self.restore(state)
         shutil.rmtree(self.run_dir, ignore_errors=True)
         return False
 
     def restore(self, state):
-        """Returns the folder to its recorded state. Lists files that changed and had no backup (SAFE-007)."""
+        """Returns the folder to its recorded state, as far as that can be done.
+
+        Returns what the game's own script did to its folder (SAFE-007): the files it created, which
+        are removed here, and the files it changed or deleted, which had no backup and stay as the
+        game left them.
+        """
         before = state["files"]
         before_dirs = set(state["dirs"])
         backup = self.run_dir / "backup"
+        created = []
         unrestored = []
 
         now = scan(self.basedir)
@@ -173,6 +186,8 @@ class Workspace:
         for relative in now:
             if relative not in before:
                 self._remove(self.basedir / relative)
+                if not made_by_tool_or_engine(relative):
+                    created.append(relative)
 
         for relative, recorded in before.items():
             current = now.get(relative)
@@ -187,7 +202,7 @@ class Workspace:
                 # Rewritten with identical content: only the timestamp needs putting back.
                 os.utime(target, ns=(recorded[1], recorded[1]))
             else:
-                unrestored.append(relative)
+                unrestored.append((relative, current is None))
 
         for relative in sorted(scan_dirs(self.basedir) - before_dirs, key=len, reverse=True):
             try:
@@ -195,7 +210,10 @@ class Workspace:
             except OSError:
                 pass
 
-        return sorted(unrestored)
+        return {
+            "created": sorted(created),
+            "changed": sorted(relative for relative, gone in unrestored if not gone),
+            "deleted": sorted(relative for relative, gone in unrestored if gone)}
 
     @staticmethod
     def _remove(path):

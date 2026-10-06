@@ -6,6 +6,7 @@ import time
 
 from renpytester.i18n import t
 from renpytester.model import ERROR, INFO, SEVERITIES, WARNING
+from renpytester.report import human_size
 
 COLOURS = {ERROR: "31", WARNING: "33", INFO: "36", "ok": "32", "dim": "2", "bold": "1"}
 # How many lines with no translation the summary lists for each language.
@@ -21,6 +22,13 @@ def where(finding):
     if not finding.file:
         return t("console.unknown_location")
     return "%s:%s" % (finding.file, finding.line) if finding.line else finding.file
+
+
+def sandbox_line(box):
+    """Where the copy that was tested is, how big, and how much of it had to be brought up to date (SAFE-012)."""
+    return t(
+        "console.sandbox", path=box["path"], size=human_size(box["bytes"]), files=box["files"],
+        copied=box["copied"], removed=box["removed"])
 
 
 class Console:
@@ -60,6 +68,8 @@ class Console:
         elif kind == "stage":
             self.stage = t("console.stage." + data["name"])
             self.status(self.stage, force=True)
+        elif kind == "sandbox":
+            self.status(t("console.copying", done=data["done"], total=data["total"]))
         elif kind == "note":
             self.write(t(data["message_id"], **data["params"]))
         elif kind == "finding":
@@ -134,6 +144,8 @@ class Console:
         for note in report.notes:
             if note["message_id"] not in ("note.repaired", "note.interrupted"):
                 self.write(t(note["message_id"], **note["params"]))
+        if report.sandbox:
+            self.write(sandbox_line(report.sandbox))
         # Left out on purpose, but never without saying how many (CFG-003, REP-007).
         if report.ignored:
             self.write(t("console.ignored", count=report.ignored))

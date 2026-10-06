@@ -12,7 +12,7 @@ from pathlib import Path
 from renpytester import i18n
 from renpytester.i18n import t
 from renpytester.model import ERROR, INFO, SEVERITIES, WARNING
-from renpytester.report import NOT_ASKED, choices, message, outcome
+from renpytester.report import NOT_ASKED, choices, human_size, message, outcome
 
 STYLE = """
 :root {
@@ -185,6 +185,11 @@ def remarks(data):
     """Things worth knowing that are not findings: notes, what was left out, what was not checked."""
     lines = [t(note["message_id"], **note["params"]) for note in data.get("notes") or []]
     summary = data.get("summary") or {}
+    box = data.get("sandbox")
+    if box:
+        lines.append(t(
+            "console.sandbox", path=box["path"], size=human_size(box["bytes"]), files=box["files"],
+            copied=box["copied"], removed=box["removed"]))
     if summary.get("ignored"):
         lines.append(t("console.ignored", count=summary["ignored"]))
     if summary.get("known"):

@@ -1,0 +1,1 @@
+The game deletes this file when it is played.

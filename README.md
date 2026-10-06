@@ -51,6 +51,26 @@ To see what a game is without playing it, run `python -m renpytester info PATH_T
 Messages are in English or Brazilian Portuguese, following your system; use `--lang en` or `--lang pt-BR` to choose.
 Run `python -m renpytester --help` for all options.
 
+## Games that write their own files
+
+RenPyTester puts back everything that it and the engine write into the game folder.
+It cannot do that for files the game's own script changes or deletes there, such as a data file the game rewrites.
+When a game does that, the report says so and names the files.
+
+For such a game, add `--sandbox`:
+
+```text
+python -m renpytester PATH_TO_GAME --sandbox
+```
+
+A copy of the game is then tested, and the game itself is only read.
+The copy is kept, so only the first run has to copy everything; later runs copy just the files that changed.
+If file dates on your disk cannot be trusted, `--sandbox-verify` compares the contents of every file, which is slower.
+
+The copies are kept in your user profile.
+`python -m renpytester cache list` shows where, and how much space each takes.
+`python -m renpytester cache clear` deletes them all, and `python -m renpytester cache clear PATH_TO_GAME` deletes the copy of one game.
+
 ## Settings file
 
 Settings can be kept in a file named `renpytester.toml` in the game's folder, beside the `game` folder, so that every run uses them.

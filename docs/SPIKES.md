@@ -21,7 +21,7 @@ Each row answers one assumption from section 9.1 of [SPEC.md](SPEC.md).
 | 9 | How much lint already covers | **Partly answered** | Lint reports orphan translations and, with a flag, unclosed tags. `renpy.check_text_tags` does not report an unclosed tag. Lint exits 1 on The Question because of "unreachable statements" in its test cases, so lint output cannot be mapped straight to errors. |
 | 10 | Font glyph coverage can be queried | **Not tested** | |
 | 11 | Several processes can share one game folder | **Confirmed** | 4 simultaneous processes on the Tutorial, all exit 0, identical results in all four. |
-| 12 | Parallel processes in sandbox mode when the game writes to its folder | **Not tested** | Design question for M6. |
+| 12 | Parallel processes in sandbox mode when the game writes to its folder | **Settled by decision** | Not measured. In M6 all processes share the one copy, and the report says so when the game wrote files (spec SAFE-007). |
 | 13 | Oldest Ren'Py 8.x worth supporting | **8.0.3 works** | Embeds Python 3.9.10. Exploration ran unchanged. Two API differences were hit: `sys.exception()` does not exist before Python 3.11, and `script.initcode` holds functions as well as nodes. |
 | 14 | `tkinter` accepts a dropped folder with the standard library alone | **Not tested** | Believed not possible without an extension; GUI-001 already allows for that. |
 

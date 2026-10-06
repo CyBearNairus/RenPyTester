@@ -26,6 +26,14 @@ def find_sdk():
     return found[-1] if found else None
 
 
+@pytest.fixture(autouse=True)
+def own_cache(tmp_path_factory, monkeypatch):
+    """Keeps sandbox copies made by a test out of the real cache of whoever runs the tests."""
+    path = tmp_path_factory.mktemp("cache")
+    monkeypatch.setenv("RENPYTESTER_CACHE", str(path))
+    return path
+
+
 @pytest.fixture(scope="session")
 def sdk():
     path = find_sdk()

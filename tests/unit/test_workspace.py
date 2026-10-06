@@ -103,9 +103,20 @@ def test_second_run_on_the_same_game_is_refused(game):
 
 @pytest.mark.req("SAFE-007")
 def test_files_the_game_changed_itself_are_reported(game):
+    (game / "game" / "old.txt").write_text("to be deleted")
     with Workspace(game) as workspace:
         (game / "game" / "art.png").write_bytes(b"y" * 4096)
-    assert workspace.changed_by_game == ["game/art.png"]
+        (game / "game" / "old.txt").unlink()
+        (game / "game" / "diary.txt").write_text("written by the game")
+        # What the engine and the tool leave behind is not the game's doing.
+        (game / "game" / "script.rpyc").write_bytes(b"compiled")
+        (game / "log.txt").write_text("engine log")
+    assert workspace.game_wrote == {
+        "created": ["game/diary.txt"], "changed": ["game/art.png"], "deleted": ["game/old.txt"]}
+    # What was created is removed again; what was changed or deleted had no backup and stays so.
+    assert not (game / "game" / "diary.txt").exists()
+    assert not (game / "game" / "old.txt").exists()
+    assert not (game / "log.txt").exists()
 
 
 @pytest.mark.req("SAFE-013")
@@ -115,5 +126,5 @@ def test_a_file_that_was_only_touched_is_not_reported(game):
     with Workspace(game) as workspace:
         art.write_bytes(art.read_bytes())
         os.utime(art, ns=(stamp + 5_000_000_000, stamp + 5_000_000_000))
-    assert workspace.changed_by_game == []
+    assert workspace.game_wrote == {"created": [], "changed": [], "deleted": []}
     assert art.stat().st_mtime_ns == stamp

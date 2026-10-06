@@ -12,7 +12,7 @@ import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from renpytester import __version__, discovery, lint
+from renpytester import __version__, discovery, lint, sandbox
 from renpytester.errors import ToolError, UsageError
 from renpytester.launcher import default_jobs, run_command, run_engine
 from renpytester.model import ERROR, Finding, Report
@@ -59,6 +59,10 @@ class Options:
     languages: tuple | None = None
     # An earlier report: findings that are in it are left out of this one (REP-007).
     baseline: str | None = None
+    # Test a cached copy of the game, not the game (SAFE-006); and compare files by content when
+    # bringing the copy up to date, which also turns the sandbox on (SAFE-011).
+    sandbox: bool = False
+    sandbox_verify: bool = False
     # From the config file (spec 4.11). `config` is the file itself, for the record.
     config: str | None = None
     severity: dict = field(default_factory=dict)
@@ -176,17 +180,45 @@ def startup_findings(game, run, output_dir, stage):
     return []
 
 
+def check_output(options, basedir):
+    """Refuses a report folder inside the game folder (REP-005). Returns the report folder."""
+    output_dir = Path(options.output).resolve()
+    if output_dir == basedir or basedir in output_dir.parents:
+        raise ToolError("error.output_inside_game", path=str(output_dir))
+    return output_dir
+
+
 def run(options, on_progress=None):
     """Runs every stage and returns the report. Raises ToolError when testing is impossible."""
-    game = discovery.discover(options.game, options.sdk)
-    if options.jobs is None:
-        options.jobs = default_jobs()
     # Read before anything is started: a baseline that cannot be read should not cost a whole run.
     known = load_baseline(options.baseline) if options.baseline else None
+    options.sandbox = options.sandbox or options.sandbox_verify
+    if not options.sandbox:
+        return run_in(options, options.game, None, known, on_progress)
 
-    output_dir = Path(options.output).resolve()
-    if output_dir == game.basedir or game.basedir in output_dir.parents:
-        raise ToolError("error.output_inside_game", path=str(output_dir))
+    # ---- A copy of the game is tested, and the game itself is only read (SAFE-006).
+    # Whatever would stop the run is looked for first: the copy can take a while to make.
+    original = discovery.discover(options.game, options.sdk).basedir
+    check_output(options, original)
+
+    def copying(done, total):
+        on_progress("sandbox", done=done, total=total)
+
+    if on_progress:
+        on_progress("stage", name="sandbox")
+    with sandbox.Sandbox(original, options.sandbox_verify, copying if on_progress else None) as box:
+        report = run_in(options, box.copy, original, known, on_progress)
+    report.sandbox = box.describe()
+    return report
+
+
+def run_in(options, basedir, original, known, on_progress):
+    """Tests the game in `basedir`. `original` is the game that folder is a sandbox copy of, or None."""
+    game = discovery.discover(basedir, options.sdk)
+    if options.jobs is None:
+        options.jobs = default_jobs()
+
+    output_dir = check_output(options, game.basedir)
     shutil.rmtree(output_dir / "engine-logs", ignore_errors=True)
     (output_dir / "engine-logs").mkdir(parents=True, exist_ok=True)
 
@@ -197,11 +229,12 @@ def run(options, on_progress=None):
         "max_time": options.max_time, "max_depth": options.max_depth, "show_window": options.show_window,
         "fail_on": options.fail_on, "fail_on_possible": options.fail_on_possible, "stages": list(options.stages),
         "languages": list(options.languages) if options.languages is not None else None,
+        "sandbox": options.sandbox, "sandbox_verify": options.sandbox_verify,
         "baseline": options.baseline, "config": options.config, "severity": dict(options.severity),
         "ignore": [rule.to_dict() for rule in options.ignore], "inputs": dict(options.inputs),
         "variables": dict(options.variables), "exclude_labels": list(options.exclude_labels),
     }
-    report = Report(__version__, str(game.basedir), game.kind, settings=settings, started=now())
+    report = Report(__version__, str(original or game.basedir), game.kind, settings=settings, started=now())
     report.game = {"renpy_version": ".".join(str(i) for i in game.renpy_version) or None}
     report.stages = {name: {"status": "not_run" if name in options.stages else "not_selected"} for name in STAGES}
     for name in NOT_BUILT:
@@ -297,12 +330,23 @@ def run(options, on_progress=None):
     finally:
         report.finished = now()
 
-    if workspace.changed_by_game:
-        report.notes.append({"message_id": "note.game_changed_files", "params": {
-            "count": len(workspace.changed_by_game), "files": workspace.changed_by_game[:20]}})
+    wrote = workspace.game_wrote
+    if any(wrote.values()):
+        # The game's own script writes into its folder (SAFE-007). In place, what it changed or
+        # deleted cannot be put back; in a sandbox it was all done to the copy.
+        files = sorted(set(wrote["created"] + wrote["changed"] + wrote["deleted"]))
+        report.game_wrote = dict(wrote)
+        report.notes.append({
+            "message_id": "note.game_wrote_files.sandbox" if original else "note.game_wrote_files",
+            "params": {
+                "created": len(wrote["created"]), "changed": len(wrote["changed"]),
+                "deleted": len(wrote["deleted"]), "files": ", ".join(files[:20])}})
+        if options.jobs > 1:
+            # Every game process shares the one folder, so what one wrote another may have read.
+            report.notes.append({"message_id": "note.game_wrote_files.jobs", "params": {}})
 
     # Until now the game's own name was not known, so the logs were collected under a working name.
-    report.name = report_name(report.game.get("name") or game.basedir.name)
+    report.name = report_name(report.game.get("name") or (original or game.basedir).name)
     logs = output_dir / (report.name + "-logs")
     shutil.rmtree(logs, ignore_errors=True)
     (output_dir / "engine-logs").rename(logs)

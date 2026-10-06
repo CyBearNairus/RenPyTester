@@ -43,6 +43,15 @@ def outcome(data):
     return "passed"
 
 
+def human_size(count):
+    """A number of bytes as a short text, such as "12.4 MB". The units are the same in every language."""
+    size = float(count)
+    for unit in ("bytes", "KB", "MB", "GB"):
+        if size < 1024 or unit == "GB":
+            return "%d %s" % (size, unit) if unit == "bytes" else "%.1f %s" % (size, unit)
+        size /= 1024
+
+
 def choices(finding):
     """The decisions that led to a finding, as short texts."""
     return [

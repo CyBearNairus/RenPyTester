@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Version 0.14 **approved** by the project owner on 2026-10-06. Version 0.15 amendments (from building M5) await approval. |
+| Status | Version 0.15 **approved** by the project owner on 2026-10-06. Version 0.16 amendments (from building M6) await approval. |
 | Last updated | 2026-10-06 |
 
 This document is the source of truth for what RenPyTester does.
@@ -138,12 +138,12 @@ A user must be able to trust the tool with their only copy of a project.
 | SAFE-003 | MUST | On startup, detect harness files left behind by a previous run that was killed, remove them, and say so. |
 | SAFE-004 | MUST | Saves and persistent data are redirected to a temporary directory. The user's real saves and persistent data are never read or written. |
 | SAFE-005 | MUST | Refuse to start if another RenPyTester run is active on the same game directory. |
-| SAFE-006 | MUST | `--sandbox` (a checkbox in the GUI) runs against a copy of the game instead of the original, for games whose own script writes or deletes files in the game directory. In this mode nothing at all is written to the original. |
-| SAFE-009 | MUST | The sandbox copy is kept in a per-user cache directory after the run and reused by later runs of the same game. |
-| SAFE-010 | MUST | Before each sandbox run the copy is synchronised with the original, rsync-style: only files that are new or changed in the original are copied, files that no longer exist in the original are removed from the copy, and files the game itself altered in the copy during an earlier run are restored. After synchronisation the copy is identical to the original. |
-| SAFE-011 | MUST | Change detection compares file size and modification time by default; `--sandbox-verify` compares content hashes instead, for when timestamps cannot be trusted. |
-| SAFE-012 | MUST | The report states where the sandbox copy is and how much disk space it uses. `renpytester cache list` and `renpytester cache clear [GAME]` show and delete cached copies; the GUI offers the same. |
-| SAFE-007 | SHOULD | Detect when the game itself created, changed or deleted files in the game directory during an in-place run, and list them in the report as a warning recommending `--sandbox`. |
+| SAFE-006 | MUST | `--sandbox` (a checkbox in the GUI) runs against a copy of the game instead of the original, for games whose own script writes or deletes files in the game directory. In this mode nothing at all is written to the original. The copy is tested exactly as a game is tested in place, and the report is the game's: its path, its name, and file names relative to its folder. `--sandbox-verify` alone also turns the sandbox on, and `sandbox = true` in the config file does the same as the option. Files that RenPyTester itself left in the original, after a run that was killed, are not copied. A copy is used by one run at a time (SAFE-005); a run in place and a sandbox run of the same game do not get in each other's way. |
+| SAFE-009 | MUST | The sandbox copy is kept in a per-user cache directory after the run and reused by later runs of the same game. The directory is `%LOCALAPPDATA%\RenPyTester\cache` on Windows, `~/Library/Caches/RenPyTester` on macOS, and `$XDG_CACHE_HOME/renpytester` or `~/.cache/renpytester` elsewhere; the `RENPYTESTER_CACHE` environment variable names another. Each game folder has one copy, told apart by the folder's full path. |
+| SAFE-010 | MUST | Before each sandbox run the copy is synchronised with the original, rsync-style: only files that are new or changed in the original are copied, files that no longer exist in the original are removed from the copy, and files the game itself altered in the copy during an earlier run are restored. After synchronisation the copy is identical to the original. Folders are part of this: empty ones are made, and ones that are gone are removed. |
+| SAFE-011 | MUST | Change detection compares file size and modification time by default; `--sandbox-verify` compares content hashes instead, for when timestamps cannot be trusted. By default a file is left alone when the original and the copy each still have the size and modification time they had after the last synchronisation; each side is compared only with its own earlier state, so disks that keep time with different precision do not cause needless copying. A copy with no such record is copied again in full. With `--sandbox-verify` the record is not used: the contents of both files are read and compared. |
+| SAFE-012 | MUST | The report states where the sandbox copy is and how much disk space it uses. `renpytester cache list` and `renpytester cache clear [GAME]` show and delete cached copies; the GUI offers the same. In the report: the path of the copy, its size in bytes and in files as the run left it, and how many files were copied and removed to bring it up to date. `cache list` also says where the cache is and when each copy was last used. `cache clear` leaves alone a copy that is being tested at that moment, and says so. |
+| SAFE-007 | SHOULD | Detect when the game itself created, changed or deleted files in the game directory during an in-place run, and list them in the report as a warning recommending `--sandbox`. This is a note in the report, not a finding: writing files is not a fault in the game. It counts and lists the files created, changed and deleted. Created files are removed again; changed and deleted ones had no backup and stay as the game left them, which the note says. Files the engine or RenPyTester write are not counted. In a sandbox run the same is reported about the copy, without the recommendation. When several game processes ran, a second note says that they shared the one folder, so one may have read what another wrote, and recommends `--jobs 1` if results vary. |
 | SAFE-008 | MUST | No network access, no telemetry. (GAME-009 is the single opt-in exception.) |
 
 ### 4.3 Driving the game (RUN)
@@ -302,7 +302,7 @@ Translation testing MUST NOT multiply run time by the number of languages: check
 | CLI-008 | SHOULD | `renpytester info GAME` prints what GAME-006 detects and exits, without running the game's story. It writes no report. When the game cannot start, it says why and exits with code 1. |
 | CLI-009 | — | *Withdrawn in 0.2.* Replaced by section 4.14. |
 | CLI-010 | MUST | `--lang en\|pt-BR` selects the interface language (4.15). |
-| CLI-011 | MUST | Run settings that requirements call configurable are available as options: `--seed` (RUN-010), `--timeout` (RUN-008), `--max-steps` (RUN-009), `--input-value` (RUN-005), `--show-window` (GAME-007), `--output` (REP-005), `--languages` (TL-001), `--config` (CFG-002), `--baseline` (REP-007). |
+| CLI-011 | MUST | Run settings that requirements call configurable are available as options: `--seed` (RUN-010), `--timeout` (RUN-008), `--max-steps` (RUN-009), `--input-value` (RUN-005), `--show-window` (GAME-007), `--output` (REP-005), `--languages` (TL-001), `--config` (CFG-002), `--baseline` (REP-007), `--sandbox` (SAFE-006), `--sandbox-verify` (SAFE-011). |
 
 ### 4.11 Configuration (CFG)
 
@@ -463,7 +463,7 @@ The harness's Python version cannot be chosen with a virtual environment, becaus
 | M3e | Parallel processes (**done** 2026-10-06) | Several game processes exploring at once. | RUN-014–016, -025, -026 |
 | M4 | Translations (**done** 2026-10-06) | Language discovery and all TL MUSTs. The SHOULD and COULD rows of 4.7 are left for later, except orphan translations (TL-007), which lint already reports. | TL-001–006, -012 |
 | M5 | Reports and config (**done** 2026-10-06) | JUnit, HTML, config file, ignore rules, baseline, the partial report after Ctrl+C and the `info` command. The two SHOULD rows that add more to the config file, stated outcomes of interactions (RUN-022) and user-authored paths (EXP-009), are left for later. | REP-003, -004, -007, -010, CFG-001–007, CLI-005, -006, -008 |
-| M6 | Sandbox | Cached copy with incremental synchronisation, cache commands. | SAFE-006, -007, -009–012 |
+| M6 | Sandbox (**done** 2026-10-06) | Cached copy with incremental synchronisation, cache commands, and the report of files a game writes by itself. The GUI's part of SAFE-012 comes with M7. | SAFE-006, -007, -009–012 |
 | M7 | Graphical interface | The window described in 4.14. | GUI, CLI-007 |
 | M8 | Packaging | Single-file executables, release CI. | DIST |
 | M9 | Hardening | Screen smoke test, performance, acceptance. | UI, NFR, 7.4 |
@@ -477,12 +477,14 @@ The harness's Python version cannot be chosen with a virtual environment, becaus
 The fourteen assumptions listed here in version 0.3 were tested in milestone M0.
 The results, evidence and measurements are in [SPIKES.md](SPIKES.md).
 
+Parallel processes in sandbox mode, when the game writes to its own directory, were settled in M6 by a decision and not by a measurement.
+All processes share the one copy, as they share the game folder in place, and the report says what that can mean (SAFE-007).
+
 Still unverified, and the requirements that depend on them:
 
 1. Invisible operation on Linux and macOS (GAME-007). Confirmed on Windows only.
 2. Querying a font's glyph coverage from inside the engine (TL-008).
-3. Parallel processes in sandbox mode when the game writes to its own directory (RUN-014 with SAFE-006).
-4. Dropping a folder onto the open window with the standard library alone (GUI-001 has a fallback).
+3. Dropping a folder onto the open window with the standard library alone (GUI-001 has a fallback).
 
 ### 9.2 Decisions
 
@@ -490,12 +492,13 @@ Open:
 
 | # | Question | Recommendation |
 | --- | --- | --- |
-| D19 | Approve the version 0.15 amendments: REP-010 and CFG-007 added; REP-003, REP-007, CFG-002 to CFG-006, CLI-006, CLI-008 and I18N-002 made precise. In particular: every run writes all three report formats; in JUnit a finding that does not fail the run is a skipped test; an excluded label acts as an immediate `return`; and an ignore rule's message pattern is tried on the message in each interface language. | Approve. |
+| D20 | Approve the version 0.16 amendments: SAFE-006, SAFE-007 and SAFE-009 to SAFE-012 made precise. In particular: several game processes share the one sandbox copy; a game writing its own files is a note, not a finding; and the copy is kept identical to the game, so the engine compiles the scripts again on every run. | Approve. |
 
 Settled on 2026-10-06:
 
 | # | Decision |
 | --- | --- |
+| D19 | Version 0.15 amendments approved: REP-010 and CFG-007 added; REP-003, REP-007, CFG-002 to CFG-006, CLI-006, CLI-008 and I18N-002 made precise. |
 | D18 | Version 0.14 amendments approved: TL-012 added; TL-001 to TL-006 made precise. |
 | D17 | Version 0.13 amendments approved: RUN-025 and RUN-026 added; RUN-014, RUN-015, EXP-003 and NFR-001 made precise. Only label runs and lint are spread over several processes; the story is explored by one. |
 | D1 | Test in place by default. Sandbox copy is opt-in (flag and GUI checkbox), cached between runs and synchronised incrementally (SAFE-006, -009 to -012). |
@@ -536,3 +539,4 @@ Settled on 2026-10-06:
 | 2026-10-06 | 0.13 | M3e built. D16 settled (0.12 approved). Added RUN-025 (no safe mode) and RUN-026 (fixed hash seed); RUN-014, RUN-015, EXP-003 and NFR-001 made precise. |
 | 2026-10-06 | 0.14 | M4 built. D17 settled (0.13 approved). Added TL-012 (summary for each language); TL-001 to TL-006 made precise; `--languages` added to CLI-011. |
 | 2026-10-06 | 0.15 | M5 built. D18 settled (0.14 approved). Added REP-010 (all three formats, from the same data) and CFG-007 (severity of a class); REP-003, REP-007, CFG-002 to CFG-006, CLI-006, CLI-008 and I18N-002 made precise; `--config` and `--baseline` added to CLI-011. |
+| 2026-10-06 | 0.16 | M6 built. D19 settled (0.15 approved). SAFE-006, SAFE-007 and SAFE-009 to SAFE-012 made precise; `--sandbox` and `--sandbox-verify` added to CLI-011; the assumption about parallel processes in a sandbox settled by decision (9.1). |

@@ -251,7 +251,8 @@ def test_help_documents_every_option_with_its_default(capsys):
     for option in (
             "--sdk", "--config", "--output", "--baseline", "--stages", "--strategy", "--languages", "--no-labels",
             "--jobs", "--max-paths", "--max-time", "--max-depth", "--seed", "--timeout", "--input-value",
-            "--max-steps", "--fail-on", "--fail-on-possible", "--show-window", "--lang", "--version"):
+            "--max-steps", "--fail-on", "--fail-on-possible", "--show-window", "--sandbox", "--sandbox-verify",
+            "--lang", "--version"):
         assert option in text, option
     for default in (
             "(default: renpytester-report)", "(default: lint,routes,translations)", "(default: explore)",

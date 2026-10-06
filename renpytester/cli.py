@@ -5,10 +5,11 @@ import sys
 import tempfile
 import traceback
 
-from renpytester import __version__, config, discovery, i18n, report, runner
+from renpytester import __version__, config, discovery, i18n, report, runner, sandbox
 from renpytester.errors import ToolError
 from renpytester.i18n import t
 from renpytester.model import ERROR, SEVERITIES
+from renpytester.report import human_size
 from renpytester.report.console import Console
 
 EXIT_OK = 0
@@ -18,6 +19,8 @@ EXIT_TOOL = 3
 
 # The command that only says what the game is (CLI-008).
 INFO = "info"
+# The command that shows and deletes the cached copies that --sandbox makes (SAFE-012).
+CACHE = "cache"
 
 
 def language_from(argv):
@@ -60,8 +63,18 @@ def build_parser():
     parser.add_argument("--fail-on", choices=[*SEVERITIES, "never"], help=t("cli.fail_on", default=ERROR))
     parser.add_argument("--fail-on-possible", action="store_true", default=None, help=t("cli.fail_on_possible"))
     parser.add_argument("--show-window", action="store_true", default=None, help=t("cli.show_window"))
+    parser.add_argument("--sandbox", action="store_true", default=None, help=t("cli.sandbox"))
+    parser.add_argument("--sandbox-verify", action="store_true", default=None, help=t("cli.sandbox_verify"))
     parser.add_argument("--lang", choices=i18n.LANGUAGES, help=t("cli.lang"))
     parser.add_argument("--version", action="version", version="renpytester " + __version__)
+    return parser
+
+
+def build_cache_parser():
+    parser = argparse.ArgumentParser(prog="renpytester " + CACHE, description=t("cli.cache.description"))
+    parser.add_argument("action", choices=("list", "clear"), help=t("cli.cache.action"))
+    parser.add_argument("game", metavar="GAME", nargs="?", help=t("cli.cache.game"))
+    parser.add_argument("--lang", choices=i18n.LANGUAGES, help=t("cli.lang"))
     return parser
 
 
@@ -87,6 +100,7 @@ def given_by(args):
         "labels": False if args.no_labels else None, "jobs": args.jobs, "seed": args.seed, "timeout": args.timeout,
         "input_value": args.input_value, "max_steps": args.max_steps, "max_paths": args.max_paths,
         "max_time": args.max_time, "max_depth": args.max_depth, "show_window": args.show_window,
+        "sandbox": args.sandbox, "sandbox_verify": args.sandbox_verify,
         "fail_on": args.fail_on, "fail_on_possible": args.fail_on_possible}
 
 
@@ -139,6 +153,36 @@ def info(argv, language_given):
     return EXIT_OK
 
 
+def cache(argv):
+    """Shows the sandbox copies kept in the cache, or deletes them (SAFE-012)."""
+    args = build_cache_parser().parse_args(argv)
+    console = Console()
+    try:
+        if args.action == "list":
+            copies = sandbox.listing()
+            console.write(t("cache.where", path=str(sandbox.cache_dir())))
+            if not copies:
+                console.write(t("cache.empty"))
+            for entry in copies:
+                console.write(t(
+                    "cache.entry.in_use" if entry["in_use"] else "cache.entry", game=entry["original"],
+                    size=human_size(entry["bytes"]), files=entry["files"],
+                    when=(entry["last_used"] or "?")[:19].replace("T", " ")))
+            if copies:
+                console.write(t("cache.total", count=len(copies), size=human_size(sum(e["bytes"] for e in copies))))
+        else:
+            original = discovery.resolve_basedir(args.game) if args.game else None
+            deleted, freed, kept = sandbox.clear(original)
+            console.write(t("cache.cleared", count=deleted, size=human_size(freed)))
+            if kept:
+                console.write(t("cache.kept", count=kept))
+    except ToolError as error:
+        return fail(console, error)
+    except Exception:
+        return internal_error(console)
+    return EXIT_OK
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     for stream in (sys.stdout, sys.stderr):
@@ -156,6 +200,8 @@ def main(argv=None):
 
     if argv and argv[0] == INFO:
         return info(argv[1:], wanted is not None)
+    if argv and argv[0] == CACHE:
+        return cache(argv[1:])
 
     args = build_parser().parse_args(argv)
     console = Console()
