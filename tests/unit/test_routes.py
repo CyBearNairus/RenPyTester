@@ -47,7 +47,7 @@ def test_frontier_knows_what_is_waiting_and_where_the_current_path_is():
     frontier.feed({"ev": "branch", "prefix": [1]})
     frontier.feed({"ev": "branch", "prefix": [2]})
     frontier.feed({"ev": "decision", "kind": "menu", "file": "game/a.rpy", "line": 5, "choice": "A", "index": 0})
-    assert frontier.waiting == {(1,), (2,)}
+    assert frontier.waiting == {(None, (1,)), (None, (2,))}
     assert [step["choice"] for step in frontier.path] == ["A"]
 
     frontier.feed({"ev": "path_end", "reason": "end", "covered": []})
@@ -56,7 +56,8 @@ def test_frontier_knows_what_is_waiting_and_where_the_current_path_is():
 
     frontier.feed({"ev": "branch_start", "prefix": [2], "path": []})
     frontier.feed({"ev": "decision", "kind": "menu", "file": "game/a.rpy", "line": 5, "choice": "C", "index": 2})
-    assert frontier.waiting == {(1,)}
+    assert frontier.waiting == {(None, (1,))}
+    assert frontier.made_up is False
     assert [step["choice"] for step in frontier.path] == ["C"]
     assert frontier.last == {"file": "game/a.rpy", "line": 5}
     assert frontier.done is None
@@ -72,3 +73,25 @@ def test_statements_reached_only_after_a_skip_are_counted_apart():
     assert (report["executed"], report["low_confidence"], report["total"]) == (2, 2, 5)
     assert report["labels"]["other"]["low_confidence"] == 2
     assert report["unreached_labels"] == []
+
+
+@pytest.mark.req("EXP-007", "RUN-012", "EXP-013")
+def test_frontier_follows_label_runs():
+    frontier = Frontier(Coverage())
+    frontier.feed({"ev": "start", "map": MAP, "labels": ["other", "third"]})
+    assert frontier.labels == ["other", "third"]
+    step = {"kind": "label", "file": "game/b.rpy", "line": 1, "choice": "other", "index": 0}
+    frontier.feed({"ev": "label_start", "label": "other", "path": [step]})
+    frontier.feed({"ev": "branch", "prefix": [1], "label": "other"})
+    assert frontier.labels == ["third"]
+    assert frontier.label_runs == 1
+    assert frontier.waiting == {("other", (1,))}
+    # Whatever happens now happens in a state the tool made up.
+    assert frontier.made_up is True
+    frontier.feed({"ev": "path_end", "reason": "end", "covered": []})
+    assert frontier.made_up is False
+
+    # A process that takes over is told what is left, and keeps to it.
+    second = Frontier(Coverage(), frontier.waiting, frontier.labels)
+    second.feed({"ev": "start", "map": MAP, "labels": []})
+    assert second.labels == ["third"]

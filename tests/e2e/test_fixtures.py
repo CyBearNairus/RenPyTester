@@ -41,7 +41,8 @@ def test_clean_game_passes(run):
     assert report["game"]["version"] == "1.0"
     assert report["game"]["kind"] == "project"
     assert report["game"]["renpy_version"].startswith("8.")
-    assert report["stages"]["routes"] == {"status": "done", "paths": 2, "end_reasons": {"end": 2}, "launches": 1}
+    assert report["stages"]["routes"] == {
+        "status": "done", "paths": 2, "end_reasons": {"end": 2}, "launches": 1, "label_runs": 0, "possible_dropped": 0}
     # Everything except the menu choice whose condition is never true.
     assert report["coverage"]["total"] - report["coverage"]["executed"] == 1
     assert "PASSED" in text
@@ -190,7 +191,7 @@ def test_reference_games_report_no_errors(sdk, tmp_path, capsys, name):
 
 @pytest.mark.req("LINT-001", "ERR-003", "ERR-004", "ERR-005", "CLI-002")
 def test_lint_finds_problems_the_story_never_reaches(run):
-    code, report, text, _game = run("lint_problems")
+    code, report, text, _game = run("lint_problems", "--no-labels")
     assert code == 1
     found = {(f["line"], f["class"]) for f in report["findings"]}
     assert found == {
@@ -224,7 +225,7 @@ def test_mistake_found_by_lint_and_by_playing_is_reported_once(run):
 
 @pytest.mark.req("CLI-002")
 def test_stages_can_be_selected(run):
-    code, report, _text, _game = run("lint_problems", "--stages", "routes")
+    code, report, _text, _game = run("lint_problems", "--stages", "routes", "--no-labels")
     assert code == 0
     assert report["findings"] == []
     assert report["stages"]["lint"]["status"] == "not_selected"
@@ -314,7 +315,8 @@ def test_hub_menu_is_covered_without_looping(run):
     assert report["findings"] == []
     coverage = report["coverage"]
     assert coverage["executed"] == coverage["total"]
-    assert report["stages"]["routes"]["paths"] <= 4
+    # The story takes four paths, and the label run that starts at the hub takes the same four.
+    assert report["stages"]["routes"]["paths"] <= 8
 
 
 @pytest.mark.req("EXP-006")
@@ -332,7 +334,7 @@ def test_path_limit_stops_exploration_and_says_so(run):
     assert code == 0
     routes = report["stages"]["routes"]
     assert routes["paths"] == 1
-    assert routes["limited"] == {"kind": "max_paths", "unexplored": 1}
+    assert routes["limited"] == {"kind": "max_paths", "unexplored": 1, "labels": 0}
     assert report["coverage"]["executed"] < report["coverage"]["total"]
     assert "--max-paths" in text
     assert report["settings"]["max_paths"] == 1
@@ -484,3 +486,82 @@ def test_minigame_with_nothing_to_infer_tries_each_place_the_script_goes(run):
     assert labels["victory"]["low_confidence"] == labels["victory"]["total"]
     assert labels["defeat"]["low_confidence"] == labels["defeat"]["total"]
     assert report["summary"]["possible"] == 0
+
+
+def steps(finding):
+    return [(step["kind"], step["choice"]) for step in finding["path"]]
+
+
+@pytest.mark.req("EXP-007", "EXP-012", "EXP-013", "EXP-014", "EXP-019", "EXP-020")
+def test_labels_the_story_never_reaches_are_played_by_themselves(run):
+    code, report, text, _game = run("labels", "--stages", "routes")
+    assert code == 1
+    found = {f["line"]: f for f in report["findings"]}
+    assert sorted(found) == [31, 40]
+
+    # Reached by playing and by its own label run: one confirmed finding.
+    assert (found[40]["possible"], found[40]["count"], found[40]["path"]) == (False, 2, [])
+    # Only reachable by starting at its label: a possible issue, with the way there.
+    assert found[31]["possible"] is True
+    assert steps(found[31]) == [("label", "secret"), ("menu", "Open the box")]
+
+    routes = report["stages"]["routes"]
+    # Every label but the story's own start and the one that needs an argument.
+    assert routes["label_runs"] == 4
+    # "chapter" fails when started by itself, but the story plays it without trouble.
+    assert routes["possible_dropped"] == 1
+    # A label run stops where its label hands over to another.
+    assert routes["end_reasons"] == {"end": 1, "exception": 4, "label end": 1}
+
+    coverage = report["coverage"]
+    assert coverage["unreached_labels"] == []
+    assert coverage["labels"]["secret"]["executed"] == 0
+    assert coverage["labels"]["secret"]["low_confidence"] == coverage["labels"]["secret"]["total"]
+    assert coverage["labels"]["ending"]["low_confidence"] == coverage["labels"]["ending"]["total"]
+    # All but the jump whose condition is never true and the return after the line that fails.
+    assert coverage["executed"] + coverage["low_confidence"] == coverage["total"] - 2
+    assert "started at label secret > Open the box" in text
+
+
+@pytest.mark.req("EXP-007")
+def test_label_runs_can_be_turned_off(run):
+    code, report, _text, _game = run("labels", "--stages", "routes", "--no-labels")
+    assert code == 1
+    assert [(f["line"], f["possible"]) for f in report["findings"]] == [(40, False)]
+    assert "label_runs" not in report["stages"]["routes"]
+    assert report["coverage"]["unreached_labels"] == ["secret", "ending"]
+    assert report["coverage"]["low_confidence"] == 0
+
+
+@pytest.mark.req("EXP-011")
+def test_label_runs_start_only_after_the_story_is_explored(run, tmp_path):
+    run("labels", "--stages", "routes")
+    log = next((tmp_path / "report").glob("report-*-logs/events-run.jsonl"))
+    events = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+    first_label_run = next(i for i, e in enumerate(events) if e["ev"] == "label_start")
+    ends = [(i, [step["kind"] for step in e["path"]][:1]) for i, e in enumerate(events) if e["ev"] == "path_end"]
+    story = [i for i, kinds in ends if kinds != ["label"]]
+    assert story and max(story) < first_label_run
+    assert [kinds for i, kinds in ends if i > first_label_run] == [["label"]] * 5
+
+
+@pytest.mark.req("EXP-015", "NFR-001")
+def test_label_runs_give_the_same_report_every_time(run):
+    _code, first, _text, _game = run("labels", "--stages", "routes")
+    _code, second, _text, _game = run("labels", "--stages", "routes")
+    assert first["findings"] == second["findings"]
+    assert first["coverage"] == second["coverage"]
+    assert first["stages"] == second["stages"]
+
+
+@pytest.mark.req("RUN-012", "EXP-007", "EXP-013")
+def test_engine_crash_in_a_label_run_does_not_stop_the_others(run):
+    code, report, _text, _game = run("crash_label", "--stages", "routes")
+    assert code == 0
+    found = {f["class"]: f for f in report["findings"]}
+    assert set(found) == {"engine-crash", "exception"}
+    assert (found["engine-crash"]["possible"], steps(found["engine-crash"])) == (True, [("label", "trap")])
+    assert (found["exception"]["possible"], steps(found["exception"])) == (True, [("label", "zeta")])
+    routes = report["stages"]["routes"]
+    assert (routes["launches"], routes["label_runs"]) == (2, 3)
+    assert report["coverage"]["labels"]["alpha"]["low_confidence"] == 3

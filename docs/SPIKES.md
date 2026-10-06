@@ -66,3 +66,6 @@ The Tutorial number is from a naive explorer that writes an event per decision a
    Init-time code, other languages' translation blocks, test cases and the implicit `return` at the end of each file must be left out of the total.
 10. **Minigames end a path as "stuck".**
     The Tutorial's Pong example has no buttons to press; the 38 statements after it are the whole of the uncovered remainder.
+11. **A saved state is restored to the last hard checkpoint, then replayed forward.**
+    Found while building M3d: `log.unfreeze` rolls back greedily past soft checkpoints, so a snapshot taken in a statement goes back to the statement after the last interaction.
+    A label run jumps away from the story's first statement by the harness's own doing, so it marks a hard checkpoint there; without it, restoring a snapshot taken inside the label landed back at the story's start.

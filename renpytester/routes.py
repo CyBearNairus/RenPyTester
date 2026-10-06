@@ -6,6 +6,8 @@ were announced but never started, so that they can be handed to a new process if
 """
 
 DECISION_FIELDS = ("kind", "file", "line", "choice", "index")
+# Steps after which a path is in a state the tool made up: a label run's start, and a skipped interaction.
+MADE_UP = ("label", "skip")
 
 
 class Coverage:
@@ -68,10 +70,14 @@ class Coverage:
 class Frontier:
     """Follows one engine process through its event stream."""
 
-    def __init__(self, coverage, waiting=()):
+    def __init__(self, coverage, waiting=(), labels=None):
         self.coverage = coverage
-        # Branches announced but not yet started, as tuples of decision indices from the game's start.
-        self.waiting = set(tuple(i) for i in waiting)
+        # Branches announced but not yet started: (label, indices). The label is the one a label run
+        # started at, or None for the game's start; the indices are the decisions taken from there.
+        self.waiting = set(waiting)
+        # Labels that label runs have still to start at; None until the game has said which there are.
+        self.labels = labels
+        self.label_runs = 0
         # The decisions of the path being played right now.
         self.path = []
         self.last = {}
@@ -92,15 +98,22 @@ class Frontier:
         if kind == "start":
             self.started = True
             self.coverage.add_map(event.get("map") or {})
+            if self.labels is None:
+                self.labels = list(event.get("labels") or [])
+        elif kind == "label_start":
+            self.label_runs += 1
+            if event["label"] in (self.labels or []):
+                self.labels.remove(event["label"])
+            self.path = [{name: step.get(name) for name in DECISION_FIELDS} for step in event.get("path") or []]
         elif kind == "decision":
             self.path.append({name: event.get(name) for name in DECISION_FIELDS})
             self.last = {"file": event.get("file"), "line": event.get("line")}
         elif kind == "heartbeat":
             self.last = {"file": event.get("file"), "line": event.get("line")}
         elif kind == "branch":
-            self.waiting.add(tuple(event["prefix"]))
+            self.waiting.add((event.get("label"), tuple(event["prefix"])))
         elif kind == "branch_start":
-            self.waiting.discard(tuple(event["prefix"]))
+            self.waiting.discard((event.get("label"), tuple(event["prefix"])))
             self.path = [{name: step.get(name) for name in DECISION_FIELDS} for step in event.get("path") or []]
         elif kind == "path_end":
             self.paths += 1
@@ -109,3 +122,8 @@ class Frontier:
         elif kind == "done":
             self.done = event
             self.interactions = event.get("interactions") or 0
+
+    @property
+    def made_up(self):
+        """True while the path being played is in a state the tool made up (RUN-021, EXP-013)."""
+        return any(step.get("kind") in MADE_UP for step in self.path)

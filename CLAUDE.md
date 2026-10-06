@@ -5,15 +5,16 @@ Runnable from source with plain Python or as a single-file executable, from a te
 
 ## Current state
 
-**Milestones M0 (spikes), M1 (walking skeleton), M2 (lint stage), M3a (exploration), M3b (checks that need no rendering) and M3c (getting past minigames) are done. M3d (label runs) is next.**
-[docs/SPEC.md](docs/SPEC.md) version 0.10 is approved; the 0.11 amendments that came out of building M3c are waiting for the owner's approval (decision D15 in spec section 9.2).
+**Milestones M0 (spikes), M1 (walking skeleton), M2 (lint stage), M3a (exploration), M3b (checks that need no rendering), M3c (getting past minigames) and M3d (label runs) are done. M3e (parallel processes) is next.**
+[docs/SPEC.md](docs/SPEC.md) version 0.11 is approved; the 0.12 amendments that came out of building M3d are waiting for the owner's approval (decision D16 in spec section 9.2).
 What works today: `python -m renpytester GAME` finds the game and its engine and explores every choice of every menu with no window, using in-memory snapshots, and carries on after a crash or a hang.
 While playing it checks for undefined images, missing image, audio and movie files, broken text tags and menus with nothing to choose.
 It also runs the engine's lint and turns its report into findings, merged with what playing found.
 It reports on the console and in a JSON file named after the game and the time of the run, in English or Brazilian Portuguese.
 It leaves the game folder byte-for-byte unchanged.
 A minigame or other interaction it cannot play is skipped, and the story is continued once for each result the script checks for; what is found after that is reported as a possible issue.
-Not built yet: label runs (M3d), parallel processes (M3e), translations (M4), JUnit/HTML/config (M5), sandbox (M6), GUI (M7), packaging (M8).
+After exploring the story it plays each label by itself, to reach what the story never reaches; what only those label runs find is a possible issue too, and is dropped if the story played the same statement without trouble.
+Not built yet: parallel processes (M3e), translations (M4), JUnit/HTML/config (M5), sandbox (M6), GUI (M7), packaging (M8).
 Engine facts and hooks are recorded in [docs/SPIKES.md](docs/SPIKES.md): read it before touching the harness.
 `spikes/` holds the throwaway M0 experiments; never import from it.
 
@@ -72,6 +73,9 @@ The ones that cause real damage if forgotten:
   Harness and orchestrator bugs exit with code 3 and say they are RenPyTester bugs.
 - **Nothing is rendered.** The harness replaces the engine's interaction layer, so render-time failures (missing image files, bad text tags, screen errors) never show up by themselves.
   Each must be checked explicitly when the statement runs.
+- **A snapshot goes back to the engine's last hard checkpoint, not to where it was taken.**
+  The engine then replays forward from there, which only works if everything since is part of the game's own state.
+  Anything the harness does to the flow, such as the jump that starts a label run, must be followed by `renpy.game.log.checkpoint(hard=True)`.
 - **The engine writes into the game folder by itself** (`game/cache/`, `game/saves/`, logs).
   Back up and restore, or remove, everything it touches; redirect logs with `RENPY_LOG_BASE`.
 - **Never modify the game.** Only add files prefixed `zzz_renpytester_`, and always remove them, including after a crash or Ctrl+C.

@@ -29,9 +29,11 @@ class Finding:
     count: int = 1
     # The same problem as seen by other stages: each entry has stage, class, message_id and params (LINT-002).
     also: list = field(default_factory=list)
-    # True when the problem was only seen in a game state the tool made up, after skipping an
-    # interaction it could not play. It may not be reachable by a real player (RUN-021, EXP-013).
+    # True when the problem was only seen in a game state the tool made up: in a label run, or after
+    # skipping an interaction it could not play. A real player may never reach it (RUN-021, EXP-013).
     possible: bool = False
+    # The statement the problem was seen at, as the harness names it. Not part of the report.
+    node: str | None = None
 
     @property
     def id(self):
@@ -42,6 +44,7 @@ class Finding:
     def to_dict(self):
         data = asdict(self)
         data["class"] = data.pop("cls")
+        del data["node"]
         return {"id": self.id, **data}
 
 
@@ -70,11 +73,24 @@ class Report:
                 existing.count += 1
                 # Seen once in a real state is enough to confirm it (EXP-012).
                 existing.possible = existing.possible and finding.possible
+                existing.node = existing.node or finding.node
                 if len(finding.path) < len(existing.path):
                     existing.path = finding.path
                 return existing
         self.findings.append(finding)
         return finding
+
+    def drop_unconfirmed(self, executed):
+        """Removes possible issues at statements that real play ran without that problem (EXP-012).
+
+        `executed` holds the statements played in a real state. A problem seen at one of them only in
+        a made-up state comes from the made-up state, not from the game. Returns how many were removed.
+        """
+        real = set(f.node for f in self.findings if not f.possible and f.node)
+        kept = [f for f in self.findings if not (f.possible and f.node in executed and f.node not in real)]
+        dropped = len(self.findings) - len(kept)
+        self.findings = kept
+        return dropped
 
     def merge_stages(self):
         """Folds a static finding into a finding another stage made at the same place (LINT-002, ERR-010).

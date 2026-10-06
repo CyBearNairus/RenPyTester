@@ -84,7 +84,9 @@ class Console:
             self.write("  %s  %s" % (self.paint(where(finding), "bold"), message(finding)))
             if finding.label:
                 self.write("      " + self.paint(t("console.in_label", label=finding.label), "dim"))
-            choices = [str(step.get("choice")) for step in finding.path if step.get("choice") is not None]
+            choices = [
+                t("console.from_label", label=step["choice"]) if step.get("kind") == "label" else str(step["choice"])
+                for step in finding.path if step.get("choice") is not None]
             if choices:
                 shown = " > ".join(choices[-8:])
                 if len(choices) > 8:

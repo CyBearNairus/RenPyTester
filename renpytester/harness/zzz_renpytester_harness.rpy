@@ -13,7 +13,9 @@
 #     a snapshot of the game is kept for each other option, so that it can be explored later without
 #     replaying the game from the start.
 #   * When a path ends (the story ends, crashes, or gets stuck), the most recent snapshot is restored
-#     and its option is taken. The run ends when no snapshots are left.
+#     and its option is taken.
+#   * When no snapshots are left, each label is played by itself (spec EXP-007), starting from the
+#     state the game had at the first statement of the story. The run ends when no labels are left.
 
 init 999 python hide:
 
@@ -33,7 +35,7 @@ init 999 python hide:
         import renpy.error as engine_error
         import renpy.execution as execution
 
-        PROTOCOL = 2
+        PROTOCOL = 3
         HARNESS_MARK = "zzz_renpytester_"
 
         # Settings arrive in a file: a list of branches to resume can be too long for an environment variable.
@@ -49,6 +51,10 @@ init 999 python hide:
         max_time = float(settings.get("max_time", 600))
         max_depth = int(settings.get("max_depth", 500))
         heartbeat_seconds = float(settings.get("heartbeat_seconds", 1.0))
+        label_runs = explore and bool(settings.get("labels", True))
+        labels_done = set(settings.get("labels_done") or [])
+        # Set when this process takes over from one that died after it had finished the story itself.
+        story_done = bool(settings.get("story_done"))
 
         events = open(os.environ["RENPYTESTER_EVENTS"], "a", encoding="utf-8")
 
@@ -76,9 +82,18 @@ init 999 python hide:
             "stack": [],
             "forced": None,
             "replay": None,
-            "resume": [list(i) for i in settings.get("resume") or []],
+            # Branches handed over by the orchestrator, each a (label or None, decision indices) pair.
+            "resume": [(label, list(prefix)) for label, prefix in settings.get("resume") or []],
             "root": None,
             "need_root": False,
+            # Label runs (EXP-007): the labels still to start at, the one being played, the label to
+            # jump to once the game is back at the story's first statement, and how deep in calls the
+            # label run started.
+            "labels": [],
+            "labels_only": False,
+            "origin": None,
+            "goto": None,
+            "base_depth": 0,
             "limit": None,
             "started_at": time.time(),
             "last_beat": time.time(),
@@ -200,17 +215,41 @@ init 999 python hide:
             return rv
 
         def indices():
-            return [i["index"] for i in state["path"]]
+            return [i["index"] for i in state["path"] if i["kind"] != "label"]
 
         def waiting():
             return len(state["stack"]) + len(state["resume"])
 
+        def unexplored():
+            return {"unexplored": waiting(), "labels": len(state["labels"])}
+
+        def needs_arguments(node):
+            parameters = getattr(node, "parameters", None)
+            if parameters is None:
+                return False
+            try:
+                parameters.apply((), {})
+                return False
+            except Exception:
+                return True
+
+        def labels_to_start():
+            """Every label a label run starts at, in script order (EXP-020)."""
+            nodes = [
+                node for node in story.values()
+                if is_public_label(node) and node.name != "start" and node.name not in labels_done
+                and not needs_arguments(node)]
+            nodes.sort(key=lambda n: (n.filename.replace("\\", "/"), n.linenumber, n.name))
+            return [node.name for node in nodes]
+
         def finding(cls, severity, message_id, params, filename=None, line=None, trace=None):
             if filename is None:
                 filename, line = here()
+            node = story.get(renpy.game.context().current)
             emit(
                 "finding", cls=cls, severity=severity, message_id=message_id, params=params, file=filename,
                 line=line, label=state["label"], path=list(state["path"]), traceback=trace,
+                node=node_id(node) if node is not None else None,
                 possible=state["speculative"] and cls != "stuck")
 
         # ---------------------------------------------------------- snapshots (EXP-002, RUN-010)
@@ -246,13 +285,41 @@ init 999 python hide:
                 return "max_time"
             return None
 
-        def start_prefix(prefix):
+        def start_at(label):
+            """Makes the path about to begin a label run, or, with no label, a path from the game's start."""
+            state["origin"] = label
+            state["goto"] = label
             state["path"] = []
             state["taken"] = {}
             state["label"] = None
+            state["forced"] = None
+            state["replay"] = None
+            # Whatever a label run meets, it meets in a state no player was necessarily ever in (EXP-013).
+            state["speculative"] = label is not None
+            if label is not None:
+                filename, line = location(label)
+                state["path"].append({"kind": "label", "file": filename, "line": line, "choice": label, "index": 0})
+
+        def start_prefix(entry):
+            label, prefix = entry
+            start_at(label)
             state["replay"] = list(prefix)
-            state["speculative"] = False
-            emit("branch_start", prefix=list(prefix), path=[])
+            emit("branch_start", prefix=list(prefix), label=label, path=list(state["path"]))
+
+        def to_root():
+            random.setstate(state["root"]["random"])
+            restore(state["root"]["snapshot"])
+
+        def next_label():
+            """Starts the next label run, or ends the run when there is none. Never returns."""
+            if not state["labels"]:
+                finish()
+            label = state["labels"].pop(0)
+            start_at(label)
+            # Each label run explores by itself, whatever was explored before it (EXP-015).
+            state["scheduled"] = set()
+            emit("label_start", label=label, path=list(state["path"]))
+            to_root()
 
         def next_path(reason):
             """Ends the current path and starts the next one waiting. Never returns."""
@@ -264,8 +331,8 @@ init 999 python hide:
                 covered_low=take_unreported_low())
 
             limit = out_of_budget()
-            if limit and waiting():
-                state["limit"] = {"kind": limit, "unexplored": waiting()}
+            if limit and (waiting() or state["labels"]):
+                state["limit"] = dict(unexplored(), kind=limit)
                 finish()
 
             if state["stack"]:
@@ -274,15 +341,22 @@ init 999 python hide:
                 state["taken"] = entry["taken"]
                 state["label"] = entry["label"]
                 state["speculative"] = entry["speculative"]
+                state["origin"] = entry["origin"]
+                state["base_depth"] = entry["base_depth"]
+                state["goto"] = None
                 state["forced"] = entry["index"]
                 random.setstate(entry["random"])
-                emit("branch_start", prefix=indices() + [entry["index"]], path=list(state["path"]))
+                emit(
+                    "branch_start", prefix=indices() + [entry["index"]], label=state["origin"],
+                    path=list(state["path"]))
                 restore(entry["snapshot"])
 
-            if state["resume"] and state["root"] is not None:
-                start_prefix(state["resume"].pop(0))
-                random.setstate(state["root"]["random"])
-                restore(state["root"]["snapshot"])
+            if state["root"] is not None:
+                if state["resume"]:
+                    start_prefix(state["resume"].pop(0))
+                    to_root()
+                # The story itself is explored first; label runs take what is left (EXP-011).
+                next_label()
 
             finish()
 
@@ -335,8 +409,9 @@ init 999 python hide:
                             "snapshot": data, "index": i, "path": list(state["path"]),
                             "taken": dict((k, set(v)) for k, v in state["taken"].items()),
                             "label": state["label"], "random": random.getstate(),
-                            "speculative": state["speculative"]})
-                        emit("branch", prefix=indices() + [i])
+                            "speculative": state["speculative"], "origin": state["origin"],
+                            "base_depth": state["base_depth"]})
+                        emit("branch", prefix=indices() + [i], label=state["origin"])
 
             state["scheduled"].add(keys[pick])
             taken.add(pick)
@@ -349,6 +424,12 @@ init 999 python hide:
 
         # ----------------------------------------------------------- statements (RUN-008, RUN-009)
 
+        def leaves_label(name):
+            origin = state["origin"]
+            if name == origin or name.startswith(origin.split(".")[0] + "."):
+                return False  # The label itself, or one of its local labels.
+            return len(renpy.game.context().return_stack) <= state["base_depth"]
+
         def per_statement():
             # Replaces the engine's infinite-loop check, which is called once per executed statement.
             name = renpy.game.context().current
@@ -358,9 +439,22 @@ init 999 python hide:
             node = story.get(name)
             if node is not None:
                 if state["need_root"]:
-                    # The first statement of the story: the point every handed-over path starts from.
+                    # The first statement of the story: the point every handed-over path and every
+                    # label run starts from.
                     state["need_root"] = False
-                    state["root"] = {"snapshot": snapshot(), "random": random.getstate()}
+                    state["root"] = {"snapshot": snapshot(), "random": random.getstate(), "name": name}
+                    if state["labels_only"]:
+                        next_label()
+                if state["goto"] is not None and name == state["root"]["name"]:
+                    target, state["goto"] = state["goto"], None
+                    state["base_depth"] = len(renpy.game.context().return_stack)
+                    # Closes the engine's record of this statement, so that a snapshot taken inside the
+                    # label goes back into the label, not to here, where nothing says to jump again.
+                    renpy.game.log.checkpoint(hard=True)
+                    raise renpy.game.JumpException(target)
+                if state["origin"] is not None and is_public_label(node) and leaves_label(name):
+                    # A label run plays its own label; the one the story moves on to has a run of its own.
+                    next_path("label end")
                 if state["speculative"]:
                     if name not in state["executed"] and name not in state["executed_low"]:
                         state["executed_low"].add(name)
@@ -380,7 +474,7 @@ init 999 python hide:
                         "heartbeat", file=filename, line=line, steps=state["steps"], paths=state["paths"],
                         waiting=waiting(), covered=take_unreported(), covered_low=take_unreported_low())
                     if state["starts"] and now - state["started_at"] > max_time:
-                        state["limit"] = {"kind": "max_time", "unexplored": waiting()}
+                        state["limit"] = dict(unexplored(), kind="max_time")
                         state["paths"] += 1
                         emit(
                             "path_end", reason="max_time", path=list(state["path"]), covered=take_unreported(),
@@ -912,13 +1006,18 @@ init 999 python hide:
 
             renpy.random.seed(seed)
             random.seed(seed)
-            emit("start", seed=seed, map=script_map())
+            if label_runs:
+                state["labels"] = labels_to_start()
+            emit("start", seed=seed, map=script_map(), labels=list(state["labels"]))
 
+            # Handed-over paths and label runs all begin at the first statement of the story; a snapshot
+            # is taken there, so that each can start without restarting the engine.
+            state["need_root"] = bool(state["resume"] or state["labels"])
             if state["resume"]:
-                # Paths handed over by the orchestrator all begin at the first statement of the story;
-                # a snapshot is taken there, so that each can start without restarting the engine.
-                state["need_root"] = True
                 start_prefix(state["resume"].pop(0))
+            elif story_done:
+                state["need_root"] = True
+                state["labels_only"] = True
 
         config.start_callbacks.append(started)
 

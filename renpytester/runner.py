@@ -34,6 +34,7 @@ class Options:
     sdk: str | None = None
     output: str = "renpytester-report"
     strategy: str = "explore"
+    labels: bool = True
     seed: int = 0
     timeout: float = 60.0
     input_value: str = "Tester"
@@ -94,7 +95,7 @@ def to_finding(event, stage):
     return Finding(
         event["cls"], event["severity"], event["message_id"], event.get("params") or {}, event.get("file"),
         event.get("line"), event.get("label"), stage, None, event.get("path") or [], event.get("traceback"),
-        possible=bool(event.get("possible")))
+        possible=bool(event.get("possible")), node=event.get("node"))
 
 
 def collect_engine_files(game, output_dir):
@@ -131,7 +132,7 @@ def run(options, on_progress=None):
     (output_dir / "engine-logs").mkdir(parents=True, exist_ok=True)
 
     settings = {
-        "strategy": options.strategy, "seed": options.seed, "timeout": options.timeout,
+        "strategy": options.strategy, "labels": options.labels, "seed": options.seed, "timeout": options.timeout,
         "input_value": options.input_value, "max_steps": options.max_steps, "max_paths": options.max_paths,
         "max_time": options.max_time, "max_depth": options.max_depth, "show_window": options.show_window,
         "fail_on": options.fail_on, "fail_on_possible": options.fail_on_possible, "stages": list(options.stages),
@@ -147,7 +148,8 @@ def run(options, on_progress=None):
             on_progress(kind, **data)
 
     harness_settings = {
-        "strategy": options.strategy, "seed": options.seed, "input_value": options.input_value,
+        "strategy": options.strategy, "labels": options.labels, "seed": options.seed,
+        "input_value": options.input_value,
         "max_steps": options.max_steps, "max_paths": options.max_paths, "max_time": options.max_time,
         "max_depth": options.max_depth}
 
@@ -245,15 +247,17 @@ def run_routes(game, options, harness_settings, work_dir, output_dir, report, pr
     stage["status"] = "running"
     coverage = Coverage()
     waiting = set()
+    labels = None
+    all_labels = []
     reasons = {}
-    totals = {"paths": 0, "statements": 0, "interactions": 0}
+    totals = {"paths": 0, "statements": 0, "interactions": 0, "label_runs": 0}
     limit = None
     launches = 0
-    resume = None
+    settings = harness_settings
 
     while True:
         launches += 1
-        frontier = Frontier(coverage, waiting)
+        frontier = Frontier(coverage, waiting, labels)
 
         def on_event(event, frontier=frontier):
             frontier.feed(event)
@@ -265,7 +269,6 @@ def run_routes(game, options, harness_settings, work_dir, output_dir, report, pr
                     "step", paths=totals["paths"] + frontier.paths, waiting=len(frontier.waiting),
                     percent=coverage.percent())
 
-        settings = dict(harness_settings, resume=[list(i) for i in resume]) if resume else harness_settings
         result = run_engine(
             game, "run", work_dir, output_dir / "engine-logs", settings, options.timeout, on_event,
             options.show_window)
@@ -275,6 +278,11 @@ def run_routes(game, options, harness_settings, work_dir, output_dir, report, pr
             raise ToolError("error.harness_bug", message=bug.get("message"), traceback=bug.get("traceback"))
 
         waiting = frontier.waiting
+        if labels is None and frontier.labels is not None:
+            all_labels = list(frontier.labels) + [
+                e["label"] for e in result.events if e["ev"] == "label_start" and e["label"] not in frontier.labels]
+        labels = frontier.labels
+        totals["label_runs"] += frontier.label_runs
         totals["paths"] += frontier.paths
         totals["statements"] += frontier.steps
         totals["interactions"] += frontier.interactions
@@ -295,27 +303,39 @@ def run_routes(game, options, harness_settings, work_dir, output_dir, report, pr
                 trace = result.output[-4000:] or None
             findings = [Finding(
                 cls, ERROR, message_id, params, frontier.last.get("file"), frontier.last.get("line"), stage=ROUTES,
-                path=list(frontier.path), traceback=trace)]
+                path=list(frontier.path), traceback=trace, possible=frontier.made_up)]
             totals["paths"] += 1
             reasons[cls] = reasons.get(cls, 0) + 1
         for finding in findings:
             progress("finding", finding=report.add(finding))
 
-        if not waiting:
+        if not waiting and not labels:
             break
         if launches > MAX_RELAUNCHES:
-            limit = {"kind": "relaunches", "unexplored": len(waiting)}
+            limit = {"kind": "relaunches", "unexplored": len(waiting), "labels": len(labels or [])}
             break
-        # Carry on with the branches the dead process had announced but not started (RUN-012).
-        resume = sorted(waiting)
+        # Carry on with the branches the dead process had announced but not started (RUN-012), the
+        # story's own before those of label runs (EXP-011), and with the labels not yet started at.
+        resume = sorted(waiting, key=lambda branch: (branch[0] or "", branch[1]))
+        settings = dict(
+            harness_settings, resume=[[label, list(prefix)] for label, prefix in resume], story_done=True,
+            labels_done=[name for name in all_labels if name not in (labels or [])])
 
     stage["status"] = "done"
     stage["paths"] = totals["paths"]
     stage["end_reasons"] = dict(sorted(reasons.items()))
     stage["launches"] = launches
+    if options.labels and options.strategy == "explore":
+        stage["label_runs"] = totals["label_runs"]
+    # Now that everything has been played: what real play ran without trouble is not a problem (EXP-012).
+    stage["possible_dropped"] = report.drop_unconfirmed(coverage.executed)
     if limit:
         stage["limited"] = limit
-        report.notes.append({"message_id": "note.limited." + limit["kind"], "params": {"count": limit["unexplored"]}})
+        if limit["unexplored"] or not limit.get("labels"):
+            report.notes.append({
+                "message_id": "note.limited." + limit["kind"], "params": {"count": limit["unexplored"]}})
+        if limit.get("labels"):
+            report.notes.append({"message_id": "note.limited.labels", "params": {"count": limit["labels"]}})
     report.coverage = coverage.report()
     report.statistics.update(statements=totals["statements"], interactions=totals["interactions"])
     collect_engine_files(game, output_dir)

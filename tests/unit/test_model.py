@@ -127,3 +127,18 @@ def test_lint_confirms_a_possible_issue_at_the_same_line():
     report.merge_stages()
     assert len(report.findings) == 1
     assert report.findings[0].possible is False
+
+
+@pytest.mark.req("EXP-012")
+def test_possible_issue_at_a_statement_real_play_ran_without_trouble_is_dropped():
+    report = Report("0", "game")
+    for kind, line, possible in (("A", 1, True), ("B", 2, True), ("C", 3, True), ("D", 3, False), ("E", 4, False)):
+        report.add(Finding(
+            "exception", ERROR, "finding.exception", {"type": kind}, "game/a.rpy", line, possible=possible,
+            node="a#%d" % line))
+
+    # Real play ran statements 1, 3 and 4. Statement 2 was only ever seen in a made-up state.
+    assert report.drop_unconfirmed({"a#1", "a#3", "a#4"}) == 1
+    assert [(f.params["type"], f.possible) for f in report.findings] == [
+        ("B", True), ("C", True), ("D", False), ("E", False)]
+    assert "node" not in report.findings[0].to_dict()

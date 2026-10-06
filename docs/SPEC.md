@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Version 0.10 **approved** by the project owner on 2026-10-06. Version 0.11 amendments (from building M3c) await approval. |
+| Status | Version 0.11 **approved** by the project owner on 2026-10-06. Version 0.12 amendments (from building M3d) await approval. |
 | Last updated | 2026-10-06 |
 
 This document is the source of truth for what RenPyTester does.
@@ -192,9 +192,11 @@ Exhaustive path coverage is impossible (choices multiply), so the target is **st
 | EXP-004 | MUST | Record for each finding the full path that led to it. |
 | EXP-005 | MUST | Report coverage: statements executed / total, per file and per label, plus the list of labels never reached. The total counts only statements a playthrough could execute: init-time code, translation blocks, engine test cases and the implicit return at the end of each file are excluded. |
 | EXP-006 | MUST | `--strategy first` plays a single path taking the first available choice everywhere. This is the fast smoke test. When the same decision point is reached again on that path, the next untried choice is taken, so that hub menus are walked through instead of looped; when every choice there has been tried, the path ends. |
-| EXP-007 | MUST | The `labels` strategy starts execution at every label in isolation, to reach code that normal exploration cannot. It is on by default and runs alongside normal exploration in the same pool of game processes (RUN-014). `--no-labels` turns it off. |
-| EXP-011 | MUST | Normal exploration has priority on the process pool; label runs use only spare capacity and never delay it. |
-| EXP-012 | MUST | When both strategies have finished, each finding from a label run is resolved against normal exploration: if normal exploration executed the same statement without error, the finding is dropped; if normal exploration reported the same problem, the two are merged into one confirmed finding (ERR-010); if normal exploration never executed that statement, the finding is kept as a *possible issue*. |
+| EXP-007 | MUST | The `labels` strategy starts execution at every label in isolation, to reach code that normal exploration cannot. It is on by default and runs alongside normal exploration in the same pool of game processes (RUN-014). `--no-labels` turns it off. `--strategy first` plays one path only and makes no label runs. |
+| EXP-019 | MUST | A label run plays its own label and nothing else. It starts from the state the game has at the first statement of the story, explores each option of each decision it meets once (EXP-016), plays the labels it calls, and ends where the story moves on to a different label, by a jump or by running off the end into the next one. A label's local labels count as part of it. What was explored before a label run has no effect on it. |
+| EXP-020 | MUST | Label runs start at every label in the game's own script except: the `start` label, which is where normal exploration begins; labels that need arguments, since there is nothing to call them with; and labels whose name starts with an underscore, which belong to the engine. |
+| EXP-011 | MUST | Normal exploration has priority on the process pool; label runs use only spare capacity and never delay it. With a single game process, label runs start when normal exploration has finished. The limits of EXP-003 cover both together; when one stops the run, the report says how many labels were not played. |
+| EXP-012 | MUST | When both strategies have finished, each finding from a label run is resolved against normal exploration: if normal exploration executed the same statement without error, the finding is dropped; if normal exploration reported the same problem, the two are merged into one confirmed finding (ERR-010); if normal exploration never executed that statement, the finding is kept as a *possible issue*. The same resolution applies to findings made after a skipped interaction (RUN-021). The report says how many findings were dropped. An engine crash or a hang during a label run is a possible issue too. |
 | EXP-013 | MUST | Possible issues are reported in their own section, separate from confirmed findings in every output, are marked as such in the JSON and JUnit reports, and do not affect the exit code unless `--fail-on-possible` is given. |
 | EXP-014 | MUST | Coverage is reported as two figures: statements executed by normal exploration, and statements additionally executed only by label runs (low confidence). |
 | EXP-015 | MUST | The resolution in EXP-012 depends only on the final results of both strategies, never on which finished first, so the report is the same for any `--jobs` value (NFR-001). |
@@ -452,7 +454,7 @@ The harness's Python version cannot be chosen with a virtual environment, becaus
 | M3a | Exploration (**done** 2026-10-06) | Branching with snapshots inside the game process, limits, coverage per file and label, continuing after crashes and hangs. | EXP-001–005, -016–018, RUN-006, -009–012, -023, ERR-006 |
 | M3b | Checks that need no rendering (**done** 2026-10-06) | Missing files, undefined images and malformed text found while playing, not only by lint. | ERR-003–005, -008, -012, -013 |
 | M3c | Getting past minigames (**done** 2026-10-06) | Skipping unplayable interactions and continuing with inferred outcomes. | RUN-017, -019–021, -024, EXP-012–014 (the parts that concern skipped interactions) |
-| M3d | Label runs | Starting at every label, and resolving those findings against normal exploration. | EXP-007, -011–015 |
+| M3d | Label runs (**done** 2026-10-06) | Starting at every label, and resolving those findings against normal exploration. | EXP-007, -011–015, -019, -020 |
 | M3e | Parallel processes | Several game processes exploring at once. | RUN-014–016 |
 | M4 | Translations | Language discovery and all TL MUSTs. | TL |
 | M5 | Reports and config | JUnit, HTML, config file, ignore rules, baseline. | REP-003–008, CFG, remaining CLI |
@@ -483,7 +485,7 @@ Open:
 
 | # | Question | Recommendation |
 | --- | --- | --- |
-| D15 | Approve the version 0.11 amendments: RUN-024 added, RUN-020 made precise. | Approve. |
+| D16 | Approve the version 0.12 amendments: EXP-019 and EXP-020 added; EXP-007, EXP-011 and EXP-012 made precise. | Approve. |
 
 Settled on 2026-10-06:
 
@@ -495,6 +497,7 @@ Settled on 2026-10-06:
 | D4 | Untranslated lines are warnings. |
 | D5 | Label runs are on by default, run alongside normal exploration, and their findings are filtered against it and reported separately as possible issues (EXP-007, -011 to -015). |
 | D9 | Version 0.5 amendments approved (the owner approved and committed M1). |
+| D15 | Version 0.11 amendments approved: RUN-024 added, RUN-020 made precise. |
 | D14 | Version 0.10 amendments approved: checks made while playing (ERR-012, ERR-013, ERR-008). |
 | D13 | Version 0.9 amendments approved: exploration rules (EXP-016 to EXP-018), RUN-023, and milestone M3 split into five parts. |
 | D12 | Version 0.8 amendments approved: lint rules made precise and reports named after the game and run time (LINT-002, -004, -005, REP-009). |
@@ -521,3 +524,4 @@ Settled on 2026-10-06:
 | 2026-10-06 | 0.9 | First part of M3 built. D12 settled (0.8 approved). Added EXP-016 to EXP-018 and RUN-023; made RUN-012 and EXP-003 precise; split M3 into M3a to M3e. |
 | 2026-10-06 | 0.10 | M3b built. D13 settled (0.9 approved). Added ERR-012 and ERR-013; ERR-008 exempts menus that use a set. |
 | 2026-10-06 | 0.11 | M3c built. D14 settled (0.10 approved). Added RUN-024; RUN-020 made precise. Possible issues and low-confidence coverage (EXP-012 to EXP-014) built for skipped interactions; label runs will reuse them. |
+| 2026-10-06 | 0.12 | M3d built. D15 settled (0.11 approved). Added EXP-019 (what a label run plays) and EXP-020 (which labels are started at); EXP-007, EXP-011 and EXP-012 made precise. |
