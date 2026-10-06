@@ -57,3 +57,27 @@ def folder_digest(path):
             digest.update(file.relative_to(path).as_posix().encode())
             digest.update(file.read_bytes())
     return digest.hexdigest()
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    """Keeps the engine and harness logs of a failed test under .cache/failures/, where they outlive the run.
+
+    An end-to-end failure can depend on timing inside the engine and not come back on the next run;
+    the logs are the only evidence.
+    """
+    outcome = yield
+    report = outcome.get_result()
+    if report.when != "call" or not report.failed:
+        return
+    tmp_path = item.funcargs.get("tmp_path")
+    if tmp_path is None:
+        return
+    logs = [p for p in Path(tmp_path).rglob("*-logs") if p.is_dir()]
+    target = ROOT / ".cache" / "failures" / item.name.replace("[", "-").replace("]", "")
+    shutil.rmtree(target, ignore_errors=True)
+    for number, folder in enumerate(logs):
+        shutil.copytree(folder, target / ("%d-%s" % (number, folder.name)))
+    for report_file in Path(tmp_path).rglob("report-*.json"):
+        target.mkdir(parents=True, exist_ok=True)
+        shutil.copy(report_file, target / report_file.name)

@@ -371,3 +371,76 @@ def test_hang_on_one_branch_does_not_stop_the_others(run):
     assert choices(found["hang"]) == ["Endless corridor"]
     assert choices(found["exception"]) == ["Broken door"]
     assert report["stages"]["routes"]["launches"] == 2
+
+
+def by_line(report):
+    return sorted((f["line"], f["class"]) for f in report["findings"])
+
+
+@pytest.mark.req("ERR-004", "ARCH-007")
+def test_undefined_image_is_found_by_playing(run):
+    code, report, text, _game = run("undefined_image", "--stages", "routes")
+    assert code == 1
+    assert by_line(report) == [(12, "undefined-image")]
+    finding = report["findings"][0]
+    assert finding["params"] == {"name": "stranger smiling"}
+    assert (finding["stage"], finding["severity"], finding["label"]) == ("routes", "error", "start")
+    assert report["stages"]["routes"]["end_reasons"] == {"end": 1}
+    assert "stranger smiling" in text
+
+
+@pytest.mark.req("ERR-003", "ARCH-007")
+def test_missing_image_file_is_found_by_playing(run):
+    code, report, _text, _game = run("missing_image_file", "--stages", "routes")
+    assert code == 1
+    assert by_line(report) == [(10, "missing-file")]
+    assert report["findings"][0]["params"] == {"file": "images/room_that_was_deleted.png"}
+    assert report["coverage"]["executed"] == report["coverage"]["total"]
+
+
+@pytest.mark.req("ERR-003", "ARCH-007")
+def test_missing_audio_files_are_found_by_playing(run):
+    code, report, _text, _game = run("missing_audio", "--stages", "routes")
+    assert code == 1
+    found = sorted((f["line"], f["class"], f["params"]["file"]) for f in report["findings"])
+    assert found == [
+        (8, "missing-file", "audio/theme_that_was_renamed.ogg"),
+        (12, "missing-file", "audio/click_that_was_deleted.ogg")]
+    assert report["stages"]["routes"]["end_reasons"] == {"end": 1}
+
+
+@pytest.mark.req("ERR-005", "ARCH-007")
+def test_bad_text_tags_are_found_by_playing(run):
+    code, report, _text, _game = run("bad_text", "--stages", "routes")
+    assert code == 1
+    assert by_line(report) == [(10, "bad-text"), (12, "bad-text"), (14, "bad-text"), (14, "bad-text")]
+    texts = sorted(f["params"]["text"] for f in report["findings"])
+    assert texts == [
+        "First {colour=#f00}choice{/colour}", "Pick {b}one.", "This tag is {i}never closed.",
+        "This tag is {wobble}not a real one{/wobble}."]
+    assert all(f["params"]["problem"] for f in report["findings"])
+
+
+@pytest.mark.req("ERR-008")
+def test_menu_with_nothing_to_choose_is_reported(run):
+    code, report, _text, _game = run("no_choice", "--stages", "routes")
+    assert code == 1
+    assert by_line(report) == [(11, "no-choice")]
+
+
+@pytest.mark.req("ERR-012", "NFR-003")
+def test_need_for_a_real_screen_is_a_note_not_an_error(run):
+    code, report, _text, _game = run("needs_display", "--stages", "routes")
+    assert code == 0
+    assert by_line(report) == [(8, "needs-display")]
+    assert report["findings"][0]["severity"] == "info"
+
+
+@pytest.mark.req("LINT-002", "ERR-010")
+def test_asset_problem_found_by_lint_and_by_playing_is_reported_once(run):
+    code, report, _text, _game = run("undefined_image")
+    assert code == 1
+    assert by_line(report) == [(12, "undefined-image")]
+    finding = report["findings"][0]
+    assert finding["stage"] == "routes"
+    assert [other["stage"] for other in finding["also"]] == ["lint"]

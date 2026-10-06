@@ -106,10 +106,12 @@ The `routes` stage also has:
 | `engine-crash` | error | The engine process ended without explanation. |
 | `stuck` | warning | The game waited for something the tool cannot do, such as a minigame. |
 | `loop` | warning | A path ran past the statement limit without ending. |
-| `undefined-image` | error | Lint: an image is shown that was never defined. |
-| `missing-file` | error | Lint: a file the script uses cannot be loaded. |
+| `undefined-image` | error | An image is shown that was never defined. Found by playing or by lint. |
+| `missing-file` | error | An image, audio or movie file the script uses cannot be loaded. Found by playing or by lint. |
 | `missing-label` | error | Lint: a jump or call names a label that does not exist. |
-| `bad-text` | error | Lint: a text tag is unknown or was never closed. |
+| `bad-text` | error | A text tag is unknown or was never closed. Found by playing or by lint. |
+| `no-choice` | error | A menu was reached with every one of its choices switched off. |
+| `needs-display` | info | The game used something that only works with a real screen, so the path could not go further. |
 | `undefined-name` | error | Lint: a name, such as a character, was never defined. |
 | `lint` | warning | Lint: a kind of problem this tool does not classify. The message is lint's own. |
 | `unreachable` | info | Lint: a statement no path can reach. |

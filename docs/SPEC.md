@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Version 0.8 **approved** by the project owner on 2026-10-06. Version 0.9 amendments (from building the first part of M3) await approval. |
+| Status | Version 0.9 **approved** by the project owner on 2026-10-06. Version 0.10 amendments (from building M3b) await approval. |
 | Last updated | 2026-10-06 |
 
 This document is the source of truth for what RenPyTester does.
@@ -170,7 +170,7 @@ The harness must get through a game with no human present.
 | RUN-010 | MUST | Seed the game's random number generator so that the same command on the same game produces the same paths and findings. The seed is configurable and recorded in the report. |
 | RUN-011 | MUST | After an error on one path, continue testing other paths. One crash never ends the run. |
 | RUN-012 | MUST | If the game process dies without the harness reporting why, report an `engine-crash` finding with the process exit code and the tail of the engine's log, then relaunch and continue with the branches that were waiting to be explored. The same applies after a hang (RUN-008). After 20 relaunches in one run, exploration stops and the report says how many branches were left. |
-| RUN-023 | MUST | A project in development reloads itself when its script files change on disk. This is switched off during a run, because a reload restarts the game in the middle of a path. |
+| RUN-023 | MUST | A project in development can reload itself when its script files change on disk. This is switched off during a run, because a reload restarts the game in the middle of a path. |
 | RUN-013 | SHOULD | Typical performance: at least 500 dialogue statements per second per game process on a mid-range desktop. |
 | RUN-014 | MUST | Explore several routes at the same time by running multiple game processes in parallel. `--jobs N` sets how many; the default is chosen from the number of CPU cores and available memory. `--jobs 1` is always supported. |
 | RUN-015 | MUST | Parallel processes do not interfere with each other: each has its own save and persistent directory and its own event file. |
@@ -215,10 +215,17 @@ Every MUST class has a fixture game that triggers it (see 7.2).
 | ERR-005 | MUST | Malformed text: unclosed or unknown text tag, or failed `[variable]` interpolation, in dialogue, menu captions or screen text. | error |
 | ERR-006 | MUST | Hang, loop, stuck, or engine crash (RUN-006, -008, -009, -012). | error / warning |
 | ERR-007 | SHOULD | Label that is never reached by any path and never referenced. | info |
-| ERR-008 | SHOULD | Menu with no selectable choice in some reached state. | error |
+| ERR-008 | SHOULD | Menu with no selectable choice in some reached state. A menu that uses a `set` is exempt: it runs out of choices by design. | error |
+| ERR-012 | MUST | The game used something that only works with a real screen, such as the clipboard. This is a limit of testing with no window, not a fault in the game: the path ends there and the finding says so. | info |
 | ERR-009 | COULD | Save and load round-trip fails at a point in the game (unpicklable state). | error |
 
 Every finding MUST carry: a stable ID, class, severity, message, script file and line, enclosing label, the stage that found it, the language active at the time, the reproduction path, and the engine traceback where one exists.
+
+**ERR-013 (MUST).** ERR-003, ERR-004 and ERR-005 are found while playing, not only by lint (ARCH-007).
+Undefined images are found when a `show` or `scene` runs, and image, audio and movie files when the statement that uses them runs.
+Text tags are checked in dialogue, speaker names, menu captions and choices, and the text of buttons on screens the tool interacts with.
+These findings do not end the path, since the game itself would carry on.
+Interpolation failures need no separate check: the engine raises on them, which is reported under ERR-002.
 
 **ERR-010 (MUST).** The same underlying problem reached by many paths is reported once, with a count and the shortest reproduction path.
 
@@ -442,7 +449,7 @@ The harness's Python version cannot be chosen with a virtual environment, becaus
 | M1 | Walking skeleton (**done** 2026-10-06) | Discover, launch invisibly, inject, clean up, play one path (`--strategy first`), catch exceptions, console + JSON report. Message catalogue in both languages from the first message onward. | GAME-001–007, I18N-001–006, SAFE-001–005, RUN-001–005, -007, -008, -011, EXP-006, ERR-001, -002, REP-001, -002, CLI-001, -003 |
 | M2 | Lint (**done** 2026-10-06) | Lint stage and finding merge. | LINT, ERR-010 |
 | M3a | Exploration (**done** 2026-10-06) | Branching with snapshots inside the game process, limits, coverage per file and label, continuing after crashes and hangs. | EXP-001–005, -016–018, RUN-006, -009–012, -023, ERR-006 |
-| M3b | Checks that need no rendering | Missing files, undefined images and malformed text found while playing, not only by lint. | ERR-003–005, ERR-008 |
+| M3b | Checks that need no rendering (**done** 2026-10-06) | Missing files, undefined images and malformed text found while playing, not only by lint. | ERR-003–005, -008, -012, -013 |
 | M3c | Getting past minigames | Skipping unplayable interactions and continuing with inferred outcomes. | RUN-017, -019–021 |
 | M3d | Label runs | Starting at every label, and resolving those findings against normal exploration. | EXP-007, -011–015 |
 | M3e | Parallel processes | Several game processes exploring at once. | RUN-014–016 |
@@ -475,7 +482,7 @@ Open:
 
 | # | Question | Recommendation |
 | --- | --- | --- |
-| D13 | Approve the version 0.9 amendments: EXP-016 to EXP-018, RUN-023, RUN-012 and EXP-003 made precise, and milestone M3 split into five parts. | Approve. |
+| D14 | Approve the version 0.10 amendments: ERR-012 and ERR-013 added, ERR-008 exempts menus that use a set. | Approve. |
 
 Settled on 2026-10-06:
 
@@ -487,6 +494,7 @@ Settled on 2026-10-06:
 | D4 | Untranslated lines are warnings. |
 | D5 | Label runs are on by default, run alongside normal exploration, and their findings are filtered against it and reported separately as possible issues (EXP-007, -011 to -015). |
 | D9 | Version 0.5 amendments approved (the owner approved and committed M1). |
+| D13 | Version 0.9 amendments approved: exploration rules (EXP-016 to EXP-018), RUN-023, and milestone M3 split into five parts. |
 | D12 | Version 0.8 amendments approved: lint rules made precise and reports named after the game and run time (LINT-002, -004, -005, REP-009). |
 | D11 | Version 0.7 amendments approved: minigames are skipped and the story continues with inferred outcomes (RUN-017, RUN-019 to RUN-022). |
 | D10 | Error files must not open in a text editor during a run (GAME-010), requested by the owner after seeing it happen during development. |
@@ -509,3 +517,4 @@ Settled on 2026-10-06:
 | 2026-10-06 | 0.7 | Minigames and other unplayable interactions are skipped and the story continues with inferred outcomes (RUN-017 reworded, RUN-019 to RUN-022). |
 | 2026-10-06 | 0.8 | M2 built. D11 settled (0.7 approved). LINT-002 made precise; added LINT-004 and LINT-005. `--stages` (CLI-002) delivered early, in M2. Added REP-009: reports named after the game and the time of the run. |
 | 2026-10-06 | 0.9 | First part of M3 built. D12 settled (0.8 approved). Added EXP-016 to EXP-018 and RUN-023; made RUN-012 and EXP-003 precise; split M3 into M3a to M3e. |
+| 2026-10-06 | 0.10 | M3b built. D13 settled (0.9 approved). Added ERR-012 and ERR-013; ERR-008 exempts menus that use a set. |

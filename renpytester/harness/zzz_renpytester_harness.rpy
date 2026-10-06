@@ -395,6 +395,8 @@ init 999 python hide:
                             words.append("".join(i for i in child.text if isinstance(i, str)))
 
                     d.visit_all(collect)
+                    for text in words:
+                        check_text(text)
                     action = d.action[0] if isinstance(d.action, (list, tuple)) and d.action else d.action
                     # No memory addresses in labels: paths must read the same on every run (NFR-001).
                     found.append((" ".join(words).strip() or "(%s)" % type(action).__name__, d))
@@ -472,6 +474,8 @@ init 999 python hide:
             return rv
 
         def menu(items, *args, **kwargs):
+            for label, value in items:
+                check_text(label)
             choices = [(label, value) for label, value in items if value is not None]
             if not choices:
                 return None
@@ -500,6 +504,168 @@ init 999 python hide:
 
         renpy.input = text_input
 
+        # ------------------------------------- checks that rendering would have made (ARCH-007)
+        #
+        # Nothing is drawn or played, so a missing picture, a missing sound or a broken text tag would
+        # pass unnoticed. Each is looked for here, at the moment the statement runs, using the engine's
+        # own functions.
+
+        reported = set()
+
+        def problem(cls, message_id, params, key):
+            """Reports something wrong at the current statement, once, and lets the story carry on."""
+            filename, line = here()
+            if (cls, filename, line, key) in reported:
+                return
+            reported.add((cls, filename, line, key))
+            finding(cls, "error", message_id, params, filename, line)
+
+        def loadable(filename, directory):
+            try:
+                return renpy.loader.loadable(filename, directory=directory)
+            except TypeError:
+                return renpy.loader.loadable(filename)  # Older engines take no directory.
+
+        def spoken_name(name):
+            return " ".join(name) if isinstance(name, (tuple, list)) else str(name)
+
+        # Undefined images (ERR-004): the engine calls this when a show or scene names no known image.
+        earlier_missing_show = config.missing_show
+
+        def missing_show(name, what, layer):
+            if state["starts"] and not state["finished"]:
+                problem("undefined-image", "finding.undefined_image", {"name": spoken_name(name)}, spoken_name(name))
+            if earlier_missing_show is not None:
+                return earlier_missing_show(name, what, layer)
+            return False
+
+        config.missing_show = missing_show
+
+        # Image files that cannot be loaded (ERR-003). The files an image needs are collected the same
+        # way the engine's lint collects them: by asking each displayable what it would preload.
+        def files_of(displayable):
+            files = []
+
+            def collect(image):
+                files.extend(image.predict_files())
+
+            previous = renpy.display.predict.image
+            renpy.display.predict.image = collect
+            try:
+                displayable.visit_all(lambda d: d.predict_one())
+            except Exception:
+                pass
+            finally:
+                renpy.display.predict.image = previous
+            return [f for f in files if isinstance(f, str)]
+
+        def check_shown(tag):
+            scene_lists = renpy.game.context().scene_lists
+            for layer in scene_lists.layers:
+                for entry in scene_lists.layers[layer]:
+                    if entry.tag == tag and entry.displayable is not None:
+                        for filename in files_of(entry.displayable):
+                            if not loadable(filename, "images"):
+                                problem("missing-file", "finding.missing_file", {"file": filename}, filename)
+
+        original_show = renpy.show
+
+        def show(name, *args, **kwargs):
+            rv = original_show(name, *args, **kwargs)
+            if state["starts"] and not state["finished"]:
+                parts = tuple(name.split()) if isinstance(name, str) else tuple(name)
+                tag = kwargs.get("tag") or (parts[0] if parts else None)
+                if tag is not None:
+                    check_shown(tag)
+            return rv
+
+        renpy.show = show
+        if config.show is original_show:
+            config.show = show
+
+        # Audio and movie files that cannot be loaded (ERR-003).
+        def audio_files(filenames, channel):
+            if isinstance(filenames, str):
+                filenames = [filenames]
+            rv = []
+            for filename in filenames or []:
+                if not isinstance(filename, str):
+                    continue
+                try:
+                    # Strips "<from 2.0 to 5.0>" and similar from the front of the name.
+                    filename = renpy.audio.audio.get_channel(channel).split_filename(filename, False)[0]
+                except Exception:
+                    pass
+                if isinstance(filename, str) and filename and not filename.startswith("<"):
+                    rv.append(filename)
+            return rv
+
+        def checked_audio(original):
+            def wrapper(filenames, channel="music", *args, **kwargs):
+                if state["starts"] and not state["finished"]:
+                    missing = [f for f in audio_files(filenames, channel) if not loadable(f, "audio")]
+                    for filename in missing:
+                        problem("missing-file", "finding.missing_file", {"file": filename}, filename)
+                    if missing:
+                        return None  # Asking the engine to play it would only fail later, off the story's path.
+                return original(filenames, channel, *args, **kwargs)
+            return wrapper
+
+        renpy.audio.music.play = checked_audio(renpy.audio.music.play)
+        renpy.audio.music.queue = checked_audio(renpy.audio.music.queue)
+
+        original_movie_cutscene = renpy.movie_cutscene
+
+        def movie_cutscene(filename, *args, **kwargs):
+            if state["starts"] and isinstance(filename, str) and not loadable(filename, "audio"):
+                if not loadable(filename, "images"):
+                    problem("missing-file", "finding.missing_file", {"file": filename}, filename)
+                    return False
+            return original_movie_cutscene(filename, *args, **kwargs)
+
+        renpy.movie_cutscene = movie_cutscene
+
+        # Text tags (ERR-005). Interpolation errors need no check: the engine raises on them.
+        def check_text(text):
+            if not isinstance(text, str) or "{" not in text:
+                return
+            try:
+                error = renpy.text.extras.check_text_tags(text, check_unclosed=True)
+            except TypeError:
+                error = renpy.text.extras.check_text_tags(text)  # Older engines always check for unclosed tags.
+            except Exception as failure:
+                error = str(failure)
+            if error:
+                problem("bad-text", "finding.bad_text", {"problem": error, "text": text[:200]}, text)
+
+        original_display_say = renpy.character.display_say
+
+        def display_say(who, what, *args, **kwargs):
+            if state["starts"] and not state["finished"]:
+                check_text(who)
+                check_text(what)
+            return original_display_say(who, what, *args, **kwargs)
+
+        renpy.character.display_say = display_say
+
+        # A menu that offers nothing (ERR-008). A menu that uses a set runs out of choices on purpose.
+        original_menu_statement = renpy.exports.menu
+
+        def menu_statement(items, set_expr, *args, **kwargs):
+            if state["starts"] and not state["finished"] and not set_expr:
+                offered = False
+                for item in items:
+                    try:
+                        if item[2] is not None and renpy.python.py_eval(item[1]):
+                            offered = True
+                    except Exception:
+                        offered = True
+                if not offered and [item for item in items if item[2] is not None]:
+                    problem("no-choice", "finding.no_choice", {}, "menu")
+            return original_menu_statement(items, set_expr, *args, **kwargs)
+
+        renpy.exports.menu = menu_statement
+
         # ------------------------------------------------ exceptions (ERR-002, RUN-011, NFR-004)
 
         original_report_exception = engine_error.report_exception
@@ -516,6 +682,13 @@ init 999 python hide:
             if frames and HARNESS_MARK in frames[-1].filename.replace("\\", "/"):
                 emit("harness_error", message="%s: %s" % (type(error).__name__, error), traceback=trace)
                 finish()
+
+            text = "%s: %s" % (type(error).__name__, error)
+            if "pygame" in type(error).__module__ and ("ideo" in str(error) or "isplay" in str(error)):
+                # The game asked for something that needs a real screen, such as the clipboard. That is
+                # a limit of testing without a window, not a fault in the game (ERR-012).
+                finding("needs-display", "info", "finding.needs_display", {"message": text}, trace=trace)
+                next_path("needs display")
 
             finding(
                 "exception", "error", "finding.exception", {"type": type(error).__name__, "message": str(error)},
@@ -556,9 +729,9 @@ init 999 python hide:
 
         config.start_callbacks.append(started)
 
-        # A project in development reloads itself when a script file changes on disk. A reload in the
-        # middle of a run restarts the game under the harness's feet, so it is switched off.
-        config.autoreload = False
+        # A project in development can reload itself when a script file changes on disk. A reload in the
+        # middle of a run restarts the game under the harness's feet, so it is switched off (RUN-023).
+        renpy.set_autoreload(False)
 
         # ------------------------------------------------------------------- commands (GAME-006)
 

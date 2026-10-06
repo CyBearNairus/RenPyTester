@@ -5,13 +5,14 @@ Runnable from source with plain Python or as a single-file executable, from a te
 
 ## Current state
 
-**Milestones M0 (spikes), M1 (walking skeleton), M2 (lint stage) and M3a (exploration) are done. M3b (checks that need no rendering) is next.**
-[docs/SPEC.md](docs/SPEC.md) version 0.8 is approved; the 0.9 amendments that came out of building M3a are waiting for the owner's approval (decision D13 in spec section 9.2).
+**Milestones M0 (spikes), M1 (walking skeleton), M2 (lint stage), M3a (exploration) and M3b (checks that need no rendering) are done. M3c (getting past minigames) is next.**
+[docs/SPEC.md](docs/SPEC.md) version 0.9 is approved; the 0.10 amendments that came out of building M3b are waiting for the owner's approval (decision D14 in spec section 9.2).
 What works today: `python -m renpytester GAME` finds the game and its engine and explores every choice of every menu with no window, using in-memory snapshots, and carries on after a crash or a hang.
+While playing it checks for undefined images, missing image, audio and movie files, broken text tags and menus with nothing to choose.
 It also runs the engine's lint and turns its report into findings, merged with what playing found.
 It reports on the console and in a JSON file named after the game and the time of the run, in English or Brazilian Portuguese.
 It leaves the game folder byte-for-byte unchanged.
-Not built yet: runtime checks for missing assets and bad text (M3b), getting past minigames (M3c), label runs (M3d), parallel processes (M3e), translations (M4), JUnit/HTML/config (M5), sandbox (M6), GUI (M7), packaging (M8).
+Not built yet: getting past minigames (M3c), label runs (M3d), parallel processes (M3e), translations (M4), JUnit/HTML/config (M5), sandbox (M6), GUI (M7), packaging (M8).
 Engine facts and hooks are recorded in [docs/SPIKES.md](docs/SPIKES.md): read it before touching the harness.
 `spikes/` holds the throwaway M0 experiments; never import from it.
 
@@ -59,6 +60,7 @@ The ones that cause real damage if forgotten:
 - **Harness talks to the orchestrator through a JSON-lines file**, never stdout.
 - **Hook only what every supported engine version has.** Ren'Py 8.0 and 8.6 differ internally (8.0 has no `Context.handle_exception`, and `renpy.error` seen from a game script is a function, not the module).
   Any harness change must pass the test suite on both the oldest and the newest SDK.
+- **A failed end-to-end test keeps its logs** under `.cache/failures/<test name>/`, because some failures depend on timing inside the engine and do not come back on the next run.
 - **When a result looks wrong, read the event log first.**
   Every run keeps what the harness reported in `<report name>-logs/events-run.jsonl`, beside the engine's own logs.
 - **The harness must never act on the game's main menu or other out-of-story screens.**
