@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | **Approved**, version 0.6, by the project owner on 2026-10-06 |
+| Status | Version 0.6 **approved** by the project owner on 2026-10-06. Version 0.7 amendments (getting past minigames) await approval. |
 | Last updated | 2026-10-06 |
 
 This document is the source of truth for what RenPyTester does.
@@ -157,7 +157,11 @@ The harness must get through a game with no human present.
 | RUN-003 | MUST | Resolve `menu` statements by selecting the choice the explorer (4.4) asks for. Choices whose condition is false are not selectable and are recorded as such. |
 | RUN-004 | MUST | Pass through timed pauses, hard pauses, transitions and movies without waiting real time. |
 | RUN-018 | MUST | A hand-built interaction that offers nothing to activate and is not a screen call, such as a movie cutscene, is passed through like a pause (extends RUN-004). |
-| RUN-017 | MUST | A minigame or other interaction with nothing to activate ends the path as `stuck` (RUN-006) with severity *warning*, and the statements that could only be reached through it are listed as not covered for that reason. |
+| RUN-017 | MUST | A minigame or other interaction with nothing to activate does not end the path. The interaction is skipped: the tool never tries to play it, and instead continues the story after it with each plausible outcome (RUN-019). A `stuck` finding of severity *info* records that the interaction itself was not exercised. |
+| RUN-019 | MUST | Plausible outcomes of a skipped interaction are found by reading the script that follows it: the values its result, and any variable read there that the story has not set, are compared against in the conditions that come next (for example `if _return == "eileen"`), plus one value that matches none of them. Each outcome is explored as a separate branch from a snapshot, the same way menu choices are. |
+| RUN-020 | MUST | When no outcome can be inferred from the script, the story continues with a neutral result, and with each label that the surrounding script jumps or calls to after the interaction. |
+| RUN-021 | MUST | Everything reached after a skipped interaction ran in a state the tool made up, so findings there are *possible issues* (EXP-013) and coverage there counts as low confidence (EXP-014), exactly as for label runs. A finding also reached by a path with no skipped interaction is confirmed (EXP-012). |
+| RUN-022 | SHOULD | The config file can state the outcome of a named interaction (for example "the `pong` screen returns `player`"), which replaces guessing and makes what follows normal, confirmed exploration. |
 | RUN-005 | MUST | Answer text input prompts with a configurable value (default `Tester`), honouring the prompt's length and allowed-character limits. |
 | RUN-006 | MUST | Handle `call screen` and other custom interactions by enumerating the activatable elements on screen and choosing among them as decisions, the same way menu choices are. If nothing activatable can be found, report a `stuck` finding and end the path. |
 | RUN-007 | MUST | Treat return to main menu, end of script, and a game-initiated quit as a normal end of path, not an error, and continue with the next path. |
@@ -430,7 +434,7 @@ The harness's Python version cannot be chosen with a virtual environment, becaus
 | M0 | Feasibility spikes (**done** 2026-10-06) | Throwaway experiments answering the assumptions in 9.1, on the oldest and newest Ren'Py 8.x. Results in [SPIKES.md](SPIKES.md). | — |
 | M1 | Walking skeleton (**done** 2026-10-06) | Discover, launch invisibly, inject, clean up, play one path (`--strategy first`), catch exceptions, console + JSON report. Message catalogue in both languages from the first message onward. | GAME-001–007, I18N-001–006, SAFE-001–005, RUN-001–005, -007, -008, -011, EXP-006, ERR-001, -002, REP-001, -002, CLI-001, -003 |
 | M2 | Lint | Lint stage and finding merge. | LINT, ERR-010 |
-| M3 | Exploration | Coverage-guided branching, snapshots, parallel processes, label runs and their resolution, limits, coverage report, custom screens. | EXP-001–005, -007, -011–015, RUN-006, -009, -010, -012, -014–016, ERR-003–006 |
+| M3 | Exploration | Coverage-guided branching, snapshots, parallel processes, label runs and their resolution, limits, coverage report, custom screens, getting past minigames. | EXP-001–005, -007, -011–015, RUN-006, -017, -019–021, -009, -010, -012, -014–016, ERR-003–006 |
 | M4 | Translations | Language discovery and all TL MUSTs. | TL |
 | M5 | Reports and config | JUnit, HTML, config file, ignore rules, baseline. | REP-003–008, CFG, remaining CLI |
 | M6 | Sandbox | Cached copy with incremental synchronisation, cache commands. | SAFE-006, -007, -009–012 |
@@ -456,7 +460,11 @@ Still unverified, and the requirements that depend on them:
 
 ### 9.2 Decisions
 
-No decisions are open.
+Open:
+
+| # | Question | Recommendation |
+| --- | --- | --- |
+| D11 | Approve the version 0.7 amendments: RUN-017 reworded, RUN-019 to RUN-022. Requested by the owner: get past minigames by working out what the story needs next, not by playing them. | Approve. Built in M3, with the config override (RUN-022) in M5. |
 
 Settled on 2026-10-06:
 
@@ -485,3 +493,4 @@ Settled on 2026-10-06:
 | 2026-10-06 | 0.4 | M0 spike results. Added ARCH-007, ARCH-008, SAFE-013, SAFE-014, RUN-017, NFR-009 (code lint). Reworded SAFE-001. Clarified EXP-005 and LINT-001. Section 9.1 replaced by a pointer to SPIKES.md and the four assumptions still unverified. |
 | 2026-10-06 | 0.5 | M1 built. EXP-006 clarified. Added RUN-018 and CLI-011. Planned structure updated to the package at the repository root. D8 settled. |
 | 2026-10-06 | 0.6 | D9 settled (0.5 approved). Added GAME-010: the engine must not open error files in a text editor. |
+| 2026-10-06 | 0.7 | Minigames and other unplayable interactions are skipped and the story continues with inferred outcomes (RUN-017 reworded, RUN-019 to RUN-022). |

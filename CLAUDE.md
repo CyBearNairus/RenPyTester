@@ -6,7 +6,7 @@ Runnable from source with plain Python or as a single-file executable, from a te
 ## Current state
 
 **Milestones M0 (spikes) and M1 (walking skeleton) are done. Milestone M2 (lint stage) is next.**
-[docs/SPEC.md](docs/SPEC.md) version 0.6 is approved, with no open decisions.
+[docs/SPEC.md](docs/SPEC.md) version 0.6 is approved; the 0.7 amendments (getting past minigames, built in M3) are waiting for the owner's approval (decision D11 in spec section 9.2).
 What works today: `python -m renpytester GAME` finds the game and its engine and plays one path with no window.
 It reports crashes and script errors on the console and in `report.json`, in English or Brazilian Portuguese.
 It leaves the game folder byte-for-byte unchanged.
