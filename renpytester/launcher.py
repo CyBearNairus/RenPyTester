@@ -22,7 +22,10 @@ class EngineRun:
 def build_environment(events_file, settings, log_dir, show_window=False):
     env = dict(os.environ)
     env["RENPYTESTER_EVENTS"] = str(events_file)
-    env["RENPYTESTER_SETTINGS"] = json.dumps(settings)
+    # A file, not the value itself: a list of branches to resume can be too long for an environment variable.
+    settings_file = Path(events_file).with_suffix(".settings.json")
+    settings_file.write_text(json.dumps(settings), encoding="utf-8")
+    env["RENPYTESTER_SETTINGS"] = str(settings_file)
 
     # Engine logs go to the output folder, never beside the game (SAFE-013).
     env["RENPY_LOG_BASE"] = str(log_dir)
@@ -108,6 +111,10 @@ def run_engine(game, command, work_dir, log_dir, settings, timeout, on_event=Non
 
     result.exit_code = process.returncode
     result.output = output_file.read_text(encoding="utf-8", errors="replace")
+    # What the harness reported is kept with the engine's logs: it is the first thing to read when a
+    # result looks wrong (REP-008).
+    with open(events_file, "rb") as source, open(log_dir / events_file.name, "ab") as kept:
+        kept.write(source.read())
     return result
 
 

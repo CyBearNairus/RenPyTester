@@ -63,7 +63,9 @@ class Console:
         elif kind == "finding":
             self.findings += 1
         elif kind == "step":
-            self.status(t("console.progress", steps=data.get("steps") or 0, findings=self.findings))
+            self.status(t(
+                "console.progress", paths=data.get("paths") or 0, waiting=data.get("waiting") or 0,
+                percent=data.get("percent") or 0, findings=self.findings))
 
     def status(self, text, force=False):
         if self.live:
@@ -108,6 +110,13 @@ class Console:
         if report.coverage and report.coverage.get("total"):
             executed, total = report.coverage["executed"], report.coverage["total"]
             self.write(t("console.coverage", executed=executed, total=total, percent=round(100 * executed / total)))
+            unreached = report.coverage.get("unreached_labels") or []
+            if unreached:
+                shown = ", ".join(unreached[:12]) + (", ..." if len(unreached) > 12 else "")
+                self.write(t("console.unreached", count=len(unreached), labels=shown))
+            routes = report.stages.get("routes", {})
+            if routes.get("paths"):
+                self.write(t("console.paths", paths=routes["paths"]))
 
         script = report.statistics.get("script", {})
         if script.get("dialogue"):

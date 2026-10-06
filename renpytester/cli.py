@@ -37,7 +37,18 @@ def build_parser():
     parser.add_argument(
         "--stages", metavar="LIST", default=",".join(defaults.stages),
         help=t("cli.stages", default=",".join(defaults.stages), all=", ".join(runner.STAGES)))
-    parser.add_argument("--strategy", choices=["first"], default=defaults.strategy, help=t("cli.strategy"))
+    parser.add_argument(
+        "--strategy", choices=["explore", "first"], default=defaults.strategy,
+        help=t("cli.strategy", default=defaults.strategy))
+    parser.add_argument(
+        "--max-paths", type=int, default=defaults.max_paths, metavar="N",
+        help=t("cli.max_paths", default=defaults.max_paths))
+    parser.add_argument(
+        "--max-time", type=float, default=defaults.max_time, metavar="SECONDS",
+        help=t("cli.max_time", default=int(defaults.max_time)))
+    parser.add_argument(
+        "--max-depth", type=int, default=defaults.max_depth, metavar="N",
+        help=t("cli.max_depth", default=defaults.max_depth))
     parser.add_argument("--seed", type=int, default=defaults.seed, help=t("cli.seed", default=defaults.seed))
     parser.add_argument(
         "--timeout", type=float, default=defaults.timeout, metavar="SECONDS",
@@ -83,7 +94,8 @@ def main(argv=None):
 
     options = runner.Options(
         game=args.game, sdk=args.sdk, output=args.output, strategy=args.strategy, seed=args.seed,
-        timeout=args.timeout, input_value=args.input_value, max_steps=args.max_steps, show_window=args.show_window,
+        timeout=args.timeout, input_value=args.input_value, max_steps=args.max_steps, max_paths=args.max_paths,
+        max_time=args.max_time, max_depth=args.max_depth, show_window=args.show_window,
         fail_on=args.fail_on, stages=tuple(i for i in runner.STAGES if i in stages))
 
     if options.show_window:

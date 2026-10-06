@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Version 0.7 **approved** by the project owner on 2026-10-06. Version 0.8 amendments (from building M2) await approval. |
+| Status | Version 0.8 **approved** by the project owner on 2026-10-06. Version 0.9 amendments (from building the first part of M3) await approval. |
 | Last updated | 2026-10-06 |
 
 This document is the source of truth for what RenPyTester does.
@@ -169,7 +169,8 @@ The harness must get through a game with no human present.
 | RUN-009 | MUST | Detect a path that keeps executing without reaching new statements (step budget per path, default configurable) and end it with a `loop` finding of severity *warning*. |
 | RUN-010 | MUST | Seed the game's random number generator so that the same command on the same game produces the same paths and findings. The seed is configurable and recorded in the report. |
 | RUN-011 | MUST | After an error on one path, continue testing other paths. One crash never ends the run. |
-| RUN-012 | MUST | If the game process dies without the harness reporting why, report an `engine-crash` finding with the process exit code and the tail of the engine's log, then relaunch and continue. |
+| RUN-012 | MUST | If the game process dies without the harness reporting why, report an `engine-crash` finding with the process exit code and the tail of the engine's log, then relaunch and continue with the branches that were waiting to be explored. The same applies after a hang (RUN-008). After 20 relaunches in one run, exploration stops and the report says how many branches were left. |
+| RUN-023 | MUST | A project in development reloads itself when its script files change on disk. This is switched off during a run, because a reload restarts the game in the middle of a path. |
 | RUN-013 | SHOULD | Typical performance: at least 500 dialogue statements per second per game process on a mid-range desktop. |
 | RUN-014 | MUST | Explore several routes at the same time by running multiple game processes in parallel. `--jobs N` sets how many; the default is chosen from the number of CPU cores and available memory. `--jobs 1` is always supported. |
 | RUN-015 | MUST | Parallel processes do not interfere with each other: each has its own save and persistent directory and its own event file. |
@@ -182,8 +183,11 @@ Exhaustive path coverage is impossible (choices multiply), so the target is **st
 | ID | Pri | Requirement |
 | --- | --- | --- |
 | EXP-001 | MUST | Explore branches so as to maximise statement coverage: at each decision point, prefer options that can lead to statements not yet executed. |
+| EXP-016 | MUST | Each option of each decision point is explored at least once. Exploration does not try every combination of choices, so content that needs a particular combination of earlier choices (for example an ending that depends on a score) may not be reached; it then shows as not covered, and is left to label runs (EXP-007). |
+| EXP-017 | MUST | When a path comes back to a decision point it has already passed, and none of that point's options is new, the last option not yet taken on this path is chosen: a hub menu's way out is conventionally listed last, and its other options are already being explored from snapshots. |
+| EXP-018 | MUST | The game's main menu is not part of the story: when it appears during a run it is left at once, the way a player pressing *Start* would leave it, and its buttons are not explored. |
 | EXP-002 | MUST | Reach deep branches without replaying the game from the start for every path (snapshot and restore of game state at decision points). |
-| EXP-003 | MUST | Bound the work: `--max-paths`, `--max-time` and `--max-depth` limits, with defaults that finish a typical short game in minutes. When a limit stops exploration early, the report says so and gives the coverage reached. |
+| EXP-003 | MUST | Bound the work: `--max-paths` (default 5000), `--max-time` (default 600 seconds) and `--max-depth` (default 500 decisions on one path, after which the path is played to its end without branching), with defaults that finish a typical short game in minutes. When a limit stops exploration early, the report says so and gives the coverage reached. |
 | EXP-004 | MUST | Record for each finding the full path that led to it. |
 | EXP-005 | MUST | Report coverage: statements executed / total, per file and per label, plus the list of labels never reached. The total counts only statements a playthrough could execute: init-time code, translation blocks, engine test cases and the implicit return at the end of each file are excluded. |
 | EXP-006 | MUST | `--strategy first` plays a single path taking the first available choice everywhere. This is the fast smoke test. When the same decision point is reached again on that path, the next untried choice is taken, so that hub menus are walked through instead of looped; when every choice there has been tried, the path ends. |
@@ -437,7 +441,11 @@ The harness's Python version cannot be chosen with a virtual environment, becaus
 | M0 | Feasibility spikes (**done** 2026-10-06) | Throwaway experiments answering the assumptions in 9.1, on the oldest and newest Ren'Py 8.x. Results in [SPIKES.md](SPIKES.md). | — |
 | M1 | Walking skeleton (**done** 2026-10-06) | Discover, launch invisibly, inject, clean up, play one path (`--strategy first`), catch exceptions, console + JSON report. Message catalogue in both languages from the first message onward. | GAME-001–007, I18N-001–006, SAFE-001–005, RUN-001–005, -007, -008, -011, EXP-006, ERR-001, -002, REP-001, -002, CLI-001, -003 |
 | M2 | Lint (**done** 2026-10-06) | Lint stage and finding merge. | LINT, ERR-010 |
-| M3 | Exploration | Coverage-guided branching, snapshots, parallel processes, label runs and their resolution, limits, coverage report, custom screens, getting past minigames. | EXP-001–005, -007, -011–015, RUN-006, -017, -019–021, -009, -010, -012, -014–016, ERR-003–006 |
+| M3a | Exploration (**done** 2026-10-06) | Branching with snapshots inside the game process, limits, coverage per file and label, continuing after crashes and hangs. | EXP-001–005, -016–018, RUN-006, -009–012, -023, ERR-006 |
+| M3b | Checks that need no rendering | Missing files, undefined images and malformed text found while playing, not only by lint. | ERR-003–005, ERR-008 |
+| M3c | Getting past minigames | Skipping unplayable interactions and continuing with inferred outcomes. | RUN-017, -019–021 |
+| M3d | Label runs | Starting at every label, and resolving those findings against normal exploration. | EXP-007, -011–015 |
+| M3e | Parallel processes | Several game processes exploring at once. | RUN-014–016 |
 | M4 | Translations | Language discovery and all TL MUSTs. | TL |
 | M5 | Reports and config | JUnit, HTML, config file, ignore rules, baseline. | REP-003–008, CFG, remaining CLI |
 | M6 | Sandbox | Cached copy with incremental synchronisation, cache commands. | SAFE-006, -007, -009–012 |
@@ -467,7 +475,7 @@ Open:
 
 | # | Question | Recommendation |
 | --- | --- | --- |
-| D12 | Approve the version 0.8 amendments: LINT-002 made precise, LINT-004 and LINT-005 added, and REP-009 (report names, requested by the owner). | Approve. They record how M2 was built. |
+| D13 | Approve the version 0.9 amendments: EXP-016 to EXP-018, RUN-023, RUN-012 and EXP-003 made precise, and milestone M3 split into five parts. | Approve. |
 
 Settled on 2026-10-06:
 
@@ -479,6 +487,7 @@ Settled on 2026-10-06:
 | D4 | Untranslated lines are warnings. |
 | D5 | Label runs are on by default, run alongside normal exploration, and their findings are filtered against it and reported separately as possible issues (EXP-007, -011 to -015). |
 | D9 | Version 0.5 amendments approved (the owner approved and committed M1). |
+| D12 | Version 0.8 amendments approved: lint rules made precise and reports named after the game and run time (LINT-002, -004, -005, REP-009). |
 | D11 | Version 0.7 amendments approved: minigames are skipped and the story continues with inferred outcomes (RUN-017, RUN-019 to RUN-022). |
 | D10 | Error files must not open in a text editor during a run (GAME-010), requested by the owner after seeing it happen during development. |
 | D8 | Version 0.4 amendments approved (the owner committed M0 and asked for M1). |
@@ -499,3 +508,4 @@ Settled on 2026-10-06:
 | 2026-10-06 | 0.6 | D9 settled (0.5 approved). Added GAME-010: the engine must not open error files in a text editor. |
 | 2026-10-06 | 0.7 | Minigames and other unplayable interactions are skipped and the story continues with inferred outcomes (RUN-017 reworded, RUN-019 to RUN-022). |
 | 2026-10-06 | 0.8 | M2 built. D11 settled (0.7 approved). LINT-002 made precise; added LINT-004 and LINT-005. `--stages` (CLI-002) delivered early, in M2. Added REP-009: reports named after the game and the time of the run. |
+| 2026-10-06 | 0.9 | First part of M3 built. D12 settled (0.8 approved). Added EXP-016 to EXP-018 and RUN-023; made RUN-012 and EXP-003 precise; split M3 into M3a to M3e. |

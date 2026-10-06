@@ -41,7 +41,9 @@ def test_clean_game_passes(run):
     assert report["game"]["version"] == "1.0"
     assert report["game"]["kind"] == "project"
     assert report["game"]["renpy_version"].startswith("8.")
-    assert report["stages"]["routes"] == {"status": "done", "paths": 1, "end_reasons": ["end"]}
+    assert report["stages"]["routes"] == {"status": "done", "paths": 2, "end_reasons": {"end": 2}, "launches": 1}
+    # Everything except the menu choice whose condition is never true.
+    assert report["coverage"]["total"] - report["coverage"]["executed"] == 1
     assert "PASSED" in text
     assert "Clean Fixture" in text
 
@@ -106,7 +108,7 @@ def test_endless_loop_ends_the_path_with_a_warning(run):
     assert code == 0
     finding = report["findings"][0]
     assert (finding["class"], finding["severity"]) == ("loop", "warning")
-    assert report["stages"]["routes"]["end_reasons"] == ["loop"]
+    assert report["stages"]["routes"]["end_reasons"] == {"loop": 1}
 
 
 @pytest.mark.req("RUN-007")
@@ -114,7 +116,7 @@ def test_game_that_quits_itself_is_a_normal_ending(run):
     code, report, _text, _game = run("quits")
     assert code == 0
     assert report["findings"] == []
-    assert report["stages"]["routes"]["end_reasons"] == ["quit"]
+    assert report["stages"]["routes"]["end_reasons"] == {"quit": 1}
 
 
 @pytest.mark.req("ERR-011")
@@ -177,6 +179,12 @@ def test_reference_games_report_no_errors(sdk, tmp_path, capsys, name):
     assert code == 0
     assert report["summary"]["error"] == 0
     assert report["game"]["languages"]
+    assert report["stages"]["routes"]["paths"] > 1
+    coverage = report["coverage"]
+    if name == "the_question":
+        assert coverage["total"] - coverage["executed"] <= 1
+    else:
+        assert coverage["executed"] / coverage["total"] > 0.9
     assert folder_digest(game) == before
 
 
@@ -257,3 +265,109 @@ def test_reports_are_named_after_the_game_and_never_overwritten(sdk, game_copy, 
         assert name in text
         assert (output / name.replace(".json", "-logs")).is_dir()
     assert not (output / "engine-logs").exists()
+
+
+def choices(finding):
+    return [step["choice"] for step in finding["path"]]
+
+
+@pytest.mark.req("EXP-001", "EXP-002", "EXP-004", "EXP-005")
+def test_crash_behind_two_choices_is_found_with_its_path(run):
+    code, report, text, _game = run("branches")
+    assert code == 1
+    assert len(report["findings"]) == 1
+    finding = report["findings"][0]
+    assert (finding["class"], finding["line"]) == ("exception", 20)
+    assert choices(finding) == ["Right", "Second"]
+    assert report["stages"]["routes"]["paths"] == 3
+    assert report["stages"]["routes"]["end_reasons"] == {"end": 2, "exception": 1}
+    coverage = report["coverage"]
+    assert coverage["executed"] == coverage["total"]
+    assert coverage["files"] == {"game/script.rpy": [coverage["total"], coverage["total"]]}
+    assert coverage["labels"]["start"]["executed"] == coverage["labels"]["start"]["total"]
+    assert coverage["unreached_labels"] == []
+    assert "Right > Second" in text
+
+
+@pytest.mark.req("RUN-011")
+def test_every_crash_is_found_in_one_run(run):
+    code, report, _text, _game = run("two_bugs")
+    assert code == 1
+    found = sorted((choices(f), f["params"]["message"]) for f in report["findings"])
+    assert found == [
+        (["Alpha"], "name 'undefined_alpha' is not defined"), (["Beta"], "name 'undefined_beta' is not defined")]
+    assert report["stages"]["routes"]["end_reasons"] == {"end": 1, "exception": 2}
+
+
+@pytest.mark.req("EXP-002")
+def test_branches_do_not_see_each_others_state(run):
+    code, report, _text, _game = run("stateful")
+    assert code == 0
+    assert report["findings"] == []
+    assert report["stages"]["routes"]["paths"] == 2
+
+
+@pytest.mark.req("EXP-001", "EXP-006")
+def test_hub_menu_is_covered_without_looping(run):
+    code, report, _text, _game = run("hub")
+    assert code == 0
+    assert report["findings"] == []
+    coverage = report["coverage"]
+    assert coverage["executed"] == coverage["total"]
+    assert report["stages"]["routes"]["paths"] <= 4
+
+
+@pytest.mark.req("EXP-006")
+def test_first_strategy_plays_a_single_path(run):
+    code, report, _text, _game = run("branches", "--strategy", "first")
+    assert code == 0
+    assert report["findings"] == []
+    assert report["stages"]["routes"]["paths"] == 1
+    assert report["coverage"]["executed"] < report["coverage"]["total"]
+
+
+@pytest.mark.req("EXP-003")
+def test_path_limit_stops_exploration_and_says_so(run):
+    code, report, text, _game = run("branches", "--max-paths", "1")
+    assert code == 0
+    routes = report["stages"]["routes"]
+    assert routes["paths"] == 1
+    assert routes["limited"] == {"kind": "max_paths", "unexplored": 1}
+    assert report["coverage"]["executed"] < report["coverage"]["total"]
+    assert "--max-paths" in text
+    assert report["settings"]["max_paths"] == 1
+
+
+@pytest.mark.req("EXP-003")
+def test_depth_limit_stops_branching_but_not_playing(run):
+    code, report, _text, _game = run("branches", "--max-depth", "1")
+    assert code == 0
+    assert report["findings"] == []
+    assert report["stages"]["routes"]["paths"] == 2
+
+
+@pytest.mark.req("RUN-012", "ERR-006")
+def test_engine_crash_on_one_branch_does_not_stop_the_others(run):
+    code, report, _text, _game = run("crash_branch")
+    assert code == 1
+    found = {f["class"]: f for f in report["findings"]}
+    assert set(found) == {"engine-crash", "exception"}
+    assert choices(found["engine-crash"]) == ["Trapdoor"]
+    assert found["engine-crash"]["params"] == {"code": 7}
+    assert choices(found["exception"]) == ["Broken door"]
+    routes = report["stages"]["routes"]
+    assert routes["launches"] == 2
+    assert routes["end_reasons"] == {"end": 1, "engine-crash": 1, "exception": 1}
+    # Everything except the statement that killed the engine, which never got to report itself.
+    assert report["coverage"]["total"] - report["coverage"]["executed"] == 1
+
+
+@pytest.mark.req("RUN-008", "RUN-012", "ERR-006")
+def test_hang_on_one_branch_does_not_stop_the_others(run):
+    code, report, _text, _game = run("hang_branch", "--timeout", "3")
+    assert code == 1
+    found = {f["class"]: f for f in report["findings"]}
+    assert set(found) == {"hang", "exception"}
+    assert choices(found["hang"]) == ["Endless corridor"]
+    assert choices(found["exception"]) == ["Broken door"]
+    assert report["stages"]["routes"]["launches"] == 2

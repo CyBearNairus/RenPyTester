@@ -61,7 +61,12 @@ Each stage has a `status`:
 
 The `lint` stage also has `findings` (how many it produced) and, on engine versions that lack some lint checks, `unsupported_options`.
 
-The `routes` stage also has `paths` (number of paths played) and `end_reasons` (why each one ended: `end`, `quit`, `exception`, `stuck`, `loop`, `exhausted`).
+The `routes` stage also has:
+
+- `paths`: how many paths were played.
+- `end_reasons`: how many paths ended for each reason (`end`, `quit`, `exception`, `stuck`, `loop`, `exhausted`, `hang`, `engine-crash`, `max_time`).
+- `launches`: how many times the game was started. More than one means it died or hung and exploration carried on in a new process.
+- `limited`: present only when a limit stopped exploration early. It has `kind` (`max_paths`, `max_time` or `relaunches`) and `unexplored`, the number of branches left.
 
 ## `coverage`
 
@@ -70,6 +75,8 @@ The `routes` stage also has `paths` (number of paths played) and `end_reasons` (
 | `executed` | integer | Statements that were played. |
 | `total` | integer | Statements a playthrough could play. Start-up code, translation blocks and engine test cases are not counted. |
 | `files` | object | For each script file, `[executed, total]`. |
+| `labels` | object | For each label, its `file` and `line`, and `executed` and `total` for the statements under it. |
+| `unreached_labels` | array of strings | Labels none of whose statements were played, in script order. |
 
 ## `findings`
 

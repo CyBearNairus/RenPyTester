@@ -12,11 +12,14 @@ from renpytester import __version__, discovery, lint
 from renpytester.errors import ToolError
 from renpytester.launcher import run_command, run_engine
 from renpytester.model import ERROR, Finding, Report
+from renpytester.routes import Coverage, Frontier
 from renpytester.workspace import PREFIX, Workspace
 
 LINT = "lint"
 ROUTES = "routes"
 STAGES = (LINT, ROUTES)
+# How many times a run starts the game again after it died or hung, before giving up on what is left.
+MAX_RELAUNCHES = 20
 # Stages the specification defines that are not built yet. They are reported as not run, never as passed.
 NOT_BUILT = ("translations", "screens")
 
@@ -30,11 +33,14 @@ class Options:
     game: str
     sdk: str | None = None
     output: str = "renpytester-report"
-    strategy: str = "first"
+    strategy: str = "explore"
     seed: int = 0
     timeout: float = 60.0
     input_value: str = "Tester"
     max_steps: int = 200000
+    max_paths: int = 5000
+    max_time: float = 600.0
+    max_depth: int = 500
     show_window: bool = False
     fail_on: str = ERROR
     stages: tuple = STAGES
@@ -124,7 +130,8 @@ def run(options, on_progress=None):
 
     settings = {
         "strategy": options.strategy, "seed": options.seed, "timeout": options.timeout,
-        "input_value": options.input_value, "max_steps": options.max_steps, "show_window": options.show_window,
+        "input_value": options.input_value, "max_steps": options.max_steps, "max_paths": options.max_paths,
+        "max_time": options.max_time, "max_depth": options.max_depth, "show_window": options.show_window,
         "fail_on": options.fail_on, "stages": list(options.stages),
     }
     report = Report(__version__, str(game.basedir), game.kind, settings=settings, started=now())
@@ -138,7 +145,9 @@ def run(options, on_progress=None):
             on_progress(kind, **data)
 
     harness_settings = {
-        "seed": options.seed, "input_value": options.input_value, "max_steps": options.max_steps}
+        "strategy": options.strategy, "seed": options.seed, "input_value": options.input_value,
+        "max_steps": options.max_steps, "max_paths": options.max_paths, "max_time": options.max_time,
+        "max_depth": options.max_depth}
 
     workspace = Workspace(game.basedir)
     try:
@@ -229,52 +238,82 @@ def run_lint(game, options, work_dir, output_dir, report, progress):
 
 
 def run_routes(game, options, harness_settings, work_dir, output_dir, report, progress):
-    """Plays the game (spec 4.3, 4.4). In this milestone: one path, first choice everywhere (EXP-006)."""
+    """Plays the game, exploring its branches (spec 4.3, 4.4)."""
     stage = report.stages[ROUTES]
     stage["status"] = "running"
-    last = {}
+    coverage = Coverage()
+    waiting = set()
+    reasons = {}
+    totals = {"paths": 0, "statements": 0, "interactions": 0}
+    limit = None
+    launches = 0
+    resume = None
 
-    def on_event(event):
-        kind = event["ev"]
-        if kind in ("heartbeat", "decision"):
-            last.update(file=event.get("file"), line=event.get("line"))
-            progress("step", steps=event.get("steps"), file=event.get("file"), line=event.get("line"))
-        elif kind == "finding":
-            progress("finding", finding=report.add(to_finding(event, ROUTES)))
+    while True:
+        launches += 1
+        frontier = Frontier(coverage, waiting)
 
-    result = run_engine(
-        game, "run", work_dir, output_dir / "engine-logs", harness_settings, options.timeout, on_event,
-        options.show_window)
+        def on_event(event, frontier=frontier):
+            frontier.feed(event)
+            kind = event["ev"]
+            if kind == "finding":
+                progress("finding", finding=report.add(to_finding(event, ROUTES)))
+            elif kind in ("heartbeat", "path_end"):
+                progress(
+                    "step", paths=totals["paths"] + frontier.paths, waiting=len(frontier.waiting),
+                    percent=coverage.percent())
 
-    bug = next((e for e in result.events if e["ev"] == "harness_error"), None)
-    if bug:
-        raise ToolError("error.harness_bug", message=bug.get("message"), traceback=bug.get("traceback"))
+        settings = dict(harness_settings, resume=[list(i) for i in resume]) if resume else harness_settings
+        result = run_engine(
+            game, "run", work_dir, output_dir / "engine-logs", settings, options.timeout, on_event,
+            options.show_window)
 
-    done = next((e for e in result.events if e["ev"] == "done"), None)
-    ends = [e for e in result.events if e["ev"] == "path_end"]
+        bug = next((e for e in result.events if e["ev"] == "harness_error"), None)
+        if bug:
+            raise ToolError("error.harness_bug", message=bug.get("message"), traceback=bug.get("traceback"))
 
-    if result.timed_out:
-        finding = Finding(
-            "hang", ERROR, "finding.hang", {"seconds": int(options.timeout)}, last.get("file"), last.get("line"),
-            stage=ROUTES, path=[
-                {k: e.get(k) for k in ("kind", "file", "line", "choice", "index")}
-                for e in result.events if e["ev"] == "decision"])
-        progress("finding", finding=report.add(finding))
-        stage["status"] = "done"
-    elif done is None:
-        findings = startup_findings(game, result, output_dir, ROUTES)
+        waiting = frontier.waiting
+        totals["paths"] += frontier.paths
+        totals["statements"] += frontier.steps
+        totals["interactions"] += frontier.interactions
+        for reason, count in frontier.reasons.items():
+            reasons[reason] = reasons.get(reason, 0) + count
+
+        if frontier.done is not None:
+            limit = frontier.done.get("limit")
+            break
+
+        # The process died or was shut down without finishing.
+        findings = [] if frontier.started else startup_findings(game, result, output_dir, ROUTES)
         if not findings:
+            if result.timed_out:
+                cls, message_id, params, trace = "hang", "finding.hang", {"seconds": int(options.timeout)}, None
+            else:
+                cls, message_id, params = "engine-crash", "finding.engine_crash", {"code": result.exit_code}
+                trace = result.output[-4000:] or None
             findings = [Finding(
-                "engine-crash", ERROR, "finding.engine_crash", {"code": result.exit_code}, last.get("file"),
-                last.get("line"), stage=ROUTES, traceback=result.output[-4000:] or None)]
+                cls, ERROR, message_id, params, frontier.last.get("file"), frontier.last.get("line"), stage=ROUTES,
+                path=list(frontier.path), traceback=trace)]
+            totals["paths"] += 1
+            reasons[cls] = reasons.get(cls, 0) + 1
         for finding in findings:
             progress("finding", finding=report.add(finding))
-        stage["status"] = "done"
-    else:
-        stage["status"] = "done"
-        report.coverage = done.get("coverage")
-        report.statistics.update(statements=done.get("steps"), interactions=done.get("interactions"))
 
-    stage["paths"] = len(ends)
-    stage["end_reasons"] = [e.get("reason") for e in ends]
+        if not waiting:
+            break
+        if launches > MAX_RELAUNCHES:
+            limit = {"kind": "relaunches", "unexplored": len(waiting)}
+            break
+        # Carry on with the branches the dead process had announced but not started (RUN-012).
+        resume = sorted(waiting)
+
+    stage["status"] = "done"
+    stage["paths"] = totals["paths"]
+    stage["end_reasons"] = dict(sorted(reasons.items()))
+    stage["launches"] = launches
+    if limit:
+        stage["limited"] = limit
+        report.notes.append({"message_id": "note.limited." + limit["kind"], "params": {"count": limit["unexplored"]}})
+    report.coverage = coverage.report()
+    report.statistics.update(statements=totals["statements"], interactions=totals["interactions"])
     collect_engine_files(game, output_dir)
