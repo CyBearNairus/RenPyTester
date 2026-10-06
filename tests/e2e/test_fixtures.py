@@ -444,3 +444,43 @@ def test_asset_problem_found_by_lint_and_by_playing_is_reported_once(run):
     finding = report["findings"][0]
     assert finding["stage"] == "routes"
     assert [other["stage"] for other in finding["also"]] == ["lint"]
+
+
+@pytest.mark.req("RUN-017", "RUN-019", "RUN-021", "EXP-013", "EXP-014")
+def test_minigame_is_skipped_and_each_outcome_the_script_checks_is_tried(run):
+    code, report, text, _game = run("minigame", "--stages", "routes")
+    assert code == 0
+    found = {f["class"]: f for f in report["findings"]}
+    assert set(found) == {"stuck", "exception"}
+
+    skipped = found["stuck"]
+    assert (skipped["line"], skipped["severity"], skipped["possible"]) == (11, "info", False)
+
+    crash = found["exception"]
+    assert (crash["line"], crash["possible"]) == (18, True)
+    assert [(step["kind"], step["choice"]) for step in crash["path"]] == [("skip", "result = 'failed'")]
+
+    assert report["summary"] == {"error": 0, "warning": 0, "info": 1, "possible": 1}
+    assert report["stages"]["routes"]["paths"] == 3
+    coverage = report["coverage"]
+    assert coverage["executed"] + coverage["low_confidence"] == coverage["total"]
+    assert coverage["low_confidence"] > 0
+    assert "Possible issues (1)" in text
+    assert "PASSED" in text
+
+
+@pytest.mark.req("EXP-013", "CLI-003")
+def test_possible_issues_fail_the_run_only_when_asked(run):
+    code, _report, _text, _game = run("minigame", "--stages", "routes", "--fail-on-possible")
+    assert code == 1
+
+
+@pytest.mark.req("RUN-020")
+def test_minigame_with_nothing_to_infer_tries_each_place_the_script_goes(run):
+    code, report, _text, _game = run("minigame_score", "--stages", "routes")
+    assert code == 0
+    assert report["coverage"]["unreached_labels"] == []
+    labels = report["coverage"]["labels"]
+    assert labels["victory"]["low_confidence"] == labels["victory"]["total"]
+    assert labels["defeat"]["low_confidence"] == labels["defeat"]["total"]
+    assert report["summary"]["possible"] == 0

@@ -79,29 +79,37 @@ class Console:
 
     # ------------------------------------------------------------------------------- summary
 
+    def listing(self, findings):
+        for finding in sorted(findings, key=lambda f: (f.file or "", f.line or 0)):
+            self.write("  %s  %s" % (self.paint(where(finding), "bold"), message(finding)))
+            if finding.label:
+                self.write("      " + self.paint(t("console.in_label", label=finding.label), "dim"))
+            choices = [str(step.get("choice")) for step in finding.path if step.get("choice") is not None]
+            if choices:
+                shown = " > ".join(choices[-8:])
+                if len(choices) > 8:
+                    shown = "... " + shown
+                self.write("      " + self.paint(t("console.path", path=shown), "dim"))
+            if finding.count > 1:
+                self.write("      " + self.paint(t("console.count", count=finding.count), "dim"))
+            for other in finding.also:
+                text = t("console.also", stage=other["stage"], message=t(other["message_id"], **other["params"]))
+                self.write("      " + self.paint(text, "dim"))
+        self.write()
+
     def summary(self, report, json_path, failed):
         self.write()
         for severity in SEVERITIES:
-            findings = [f for f in report.findings if f.severity == severity]
-            if not findings:
-                continue
-            self.write(self.paint(t("severity.%s.title" % severity, count=len(findings)), severity))
-            for finding in sorted(findings, key=lambda f: (f.file or "", f.line or 0)):
-                self.write("  %s  %s" % (self.paint(where(finding), "bold"), message(finding)))
-                if finding.label:
-                    self.write("      " + self.paint(t("console.in_label", label=finding.label), "dim"))
-                choices = [str(step.get("choice")) for step in finding.path if step.get("choice") is not None]
-                if choices:
-                    shown = " > ".join(choices[-8:])
-                    if len(choices) > 8:
-                        shown = "... " + shown
-                    self.write("      " + self.paint(t("console.path", path=shown), "dim"))
-                if finding.count > 1:
-                    self.write("      " + self.paint(t("console.count", count=finding.count), "dim"))
-                for other in finding.also:
-                    text = t("console.also", stage=other["stage"], message=t(other["message_id"], **other["params"]))
-                    self.write("      " + self.paint(text, "dim"))
-            self.write()
+            findings = [f for f in report.findings if f.severity == severity and not f.possible]
+            if findings:
+                self.write(self.paint(t("severity.%s.title" % severity, count=len(findings)), severity))
+                self.listing(findings)
+
+        possible = [f for f in report.findings if f.possible]
+        if possible:
+            self.write(self.paint(t("console.possible.title", count=len(possible)), WARNING))
+            self.write(self.paint("  " + t("console.possible.why"), "dim"))
+            self.listing(possible)
 
         for note in report.notes:
             if note["message_id"] != "note.repaired":
@@ -110,6 +118,8 @@ class Console:
         if report.coverage and report.coverage.get("total"):
             executed, total = report.coverage["executed"], report.coverage["total"]
             self.write(t("console.coverage", executed=executed, total=total, percent=round(100 * executed / total)))
+            if report.coverage.get("low_confidence"):
+                self.write(t("console.coverage_low", count=report.coverage["low_confidence"]))
             unreached = report.coverage.get("unreached_labels") or []
             if unreached:
                 shown = ", ".join(unreached[:12]) + (", ..." if len(unreached) > 12 else "")
@@ -130,6 +140,8 @@ class Console:
 
         counts = t("console.totals", errors=report.count(ERROR), warnings=report.count(WARNING),
                    infos=report.count(INFO))
+        if report.count_possible():
+            counts += ", " + t("console.totals_possible", count=report.count_possible())
         if not report.complete:
             self.write(self.paint(t("console.incomplete") + "  " + counts, ERROR))
         elif failed:

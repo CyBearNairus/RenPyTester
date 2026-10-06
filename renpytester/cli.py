@@ -61,6 +61,7 @@ def build_parser():
         help=t("cli.max_steps", default=defaults.max_steps))
     parser.add_argument(
         "--fail-on", choices=[*SEVERITIES, "never"], default=ERROR, help=t("cli.fail_on", default=ERROR))
+    parser.add_argument("--fail-on-possible", action="store_true", help=t("cli.fail_on_possible"))
     parser.add_argument("--show-window", action="store_true", help=t("cli.show_window"))
     parser.add_argument("--lang", choices=i18n.LANGUAGES, help=t("cli.lang"))
     parser.add_argument("--version", action="version", version="renpytester " + __version__)
@@ -96,7 +97,8 @@ def main(argv=None):
         game=args.game, sdk=args.sdk, output=args.output, strategy=args.strategy, seed=args.seed,
         timeout=args.timeout, input_value=args.input_value, max_steps=args.max_steps, max_paths=args.max_paths,
         max_time=args.max_time, max_depth=args.max_depth, show_window=args.show_window,
-        fail_on=args.fail_on, stages=tuple(i for i in runner.STAGES if i in stages))
+        fail_on=args.fail_on, fail_on_possible=args.fail_on_possible,
+        stages=tuple(i for i in runner.STAGES if i in stages))
 
     if options.show_window:
         console.write(console.paint(t("cli.show_window_warning"), "warning"))
@@ -115,7 +117,7 @@ def main(argv=None):
         console.write(traceback.format_exc())
         return EXIT_TOOL
 
-    failed = report.failed(options.fail_on)
+    failed = report.failed(options.fail_on, options.fail_on_possible)
     json_path = json_report.write(report, options.output)
     console.summary(report, json_path, failed)
 

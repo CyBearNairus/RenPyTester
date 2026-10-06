@@ -29,6 +29,9 @@ class Finding:
     count: int = 1
     # The same problem as seen by other stages: each entry has stage, class, message_id and params (LINT-002).
     also: list = field(default_factory=list)
+    # True when the problem was only seen in a game state the tool made up, after skipping an
+    # interaction it could not play. It may not be reachable by a real player (RUN-021, EXP-013).
+    possible: bool = False
 
     @property
     def id(self):
@@ -65,6 +68,8 @@ class Report:
         for existing in self.findings:
             if existing.id == finding.id:
                 existing.count += 1
+                # Seen once in a real state is enough to confirm it (EXP-012).
+                existing.possible = existing.possible and finding.possible
                 if len(finding.path) < len(existing.path):
                     existing.path = finding.path
                 return existing
@@ -83,6 +88,7 @@ class Report:
         for finding in self.findings:
             twin = played.get((finding.file, finding.line))
             if finding.stage == "lint" and finding.severity == ERROR and twin is not None:
+                twin.possible = False  # Lint read it straight from the script: it is real.
                 twin.also.append({
                     "stage": finding.stage, "class": finding.cls, "message_id": finding.message_id,
                     "params": finding.params})
@@ -91,18 +97,24 @@ class Report:
         self.findings = kept
 
     def count(self, severity):
-        return sum(1 for f in self.findings if f.severity == severity)
+        """Confirmed findings of one severity. Possible issues are counted apart (EXP-013)."""
+        return sum(1 for f in self.findings if f.severity == severity and not f.possible)
 
-    def failed(self, fail_on=ERROR):
+    def count_possible(self):
+        return sum(1 for f in self.findings if f.possible)
+
+    def failed(self, fail_on=ERROR, fail_on_possible=False):
         """True if any finding is at or above the threshold (CLI-003, CLI-004)."""
         if fail_on == "never":
             return False
         worst = SEVERITIES.index(fail_on)
-        return any(SEVERITIES.index(f.severity) <= worst for f in self.findings)
+        counted = [f for f in self.findings if fail_on_possible or not f.possible]
+        return any(SEVERITIES.index(f.severity) <= worst for f in counted)
 
     def to_dict(self):
         order = {name: index for index, name in enumerate(SEVERITIES)}
-        findings = sorted(self.findings, key=lambda f: (order[f.severity], f.file or "", f.line or 0, f.cls))
+        findings = sorted(
+            self.findings, key=lambda f: (f.possible, order[f.severity], f.file or "", f.line or 0, f.cls))
         return {
             "schema_version": SCHEMA_VERSION,
             "tool": {"name": "renpytester", "version": self.tool_version},
@@ -112,7 +124,7 @@ class Report:
             "game": {"path": self.game_path, "kind": self.game_kind, **self.game},
             "settings": self.settings,
             "stages": self.stages,
-            "summary": {name: self.count(name) for name in SEVERITIES},
+            "summary": {**{name: self.count(name) for name in SEVERITIES}, "possible": self.count_possible()},
             "coverage": self.coverage,
             "statistics": self.statistics,
             "notes": self.notes,

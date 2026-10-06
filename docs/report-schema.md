@@ -19,7 +19,7 @@ Adding a field does not change it, so readers should ignore fields they do not k
 | `game` | object | See below. |
 | `settings` | object | The settings the run used, including `seed`, so the run can be repeated. |
 | `stages` | object | One entry per stage, keyed by stage name. See below. |
-| `summary` | object | Number of findings per severity: `error`, `warning`, `info`. |
+| `summary` | object | Number of confirmed findings per severity (`error`, `warning`, `info`), and `possible`, the number of possible issues of any severity. |
 | `coverage` | object or null | See below. `null` when the game never started. |
 | `statistics` | object | `statements` and `interactions` executed, and `script`: what lint counted (see below). |
 | `notes` | array | Things worth knowing that are not problems in the game. Each has `message_id` and `params`. |
@@ -73,10 +73,11 @@ The `routes` stage also has:
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `executed` | integer | Statements that were played. |
+| `low_confidence` | integer | Statements reached only after the tool skipped something it could not play, in a state it made up. Not included in `executed`. |
 | `total` | integer | Statements a playthrough could play. Start-up code, translation blocks and engine test cases are not counted. |
 | `files` | object | For each script file, `[executed, total]`. |
-| `labels` | object | For each label, its `file` and `line`, and `executed` and `total` for the statements under it. |
-| `unreached_labels` | array of strings | Labels none of whose statements were played, in script order. |
+| `labels` | object | For each label, its `file` and `line`, and `executed`, `low_confidence` and `total` for the statements under it. |
+| `unreached_labels` | array of strings | Labels none of whose statements were played, even with low confidence, in script order. |
 
 ## `findings`
 
@@ -90,9 +91,10 @@ The `routes` stage also has:
 | `label` | string or null | The label being played. |
 | `stage` | string | The stage that found it. |
 | `language` | string or null | The game language active at the time. |
-| `path` | array | The decisions that led here, in order. Each has `kind` (`menu`, `screen` or `input`), `file`, `line`, `choice` (the text chosen or typed) and `index`. |
+| `path` | array | The decisions that led here, in order. Each has `kind` (`menu`, `screen`, `input`, or `skip` for the outcome chosen for a skipped interaction), `file`, `line`, `choice` (the text chosen or typed) and `index`. |
 | `traceback` | string or null | The engine's traceback, when there is one. |
 | `count` | integer | How many times this problem was reached. |
+| `possible` | boolean | `true` when the problem was only seen after the tool skipped something it could not play, so a real player may never reach it. Possible issues do not fail a run unless `--fail-on-possible` is given. |
 | `also` | array | The same problem as other stages reported it. Each entry has `stage`, `class`, `message_id` and `params`. |
 
 ## Finding classes
@@ -104,7 +106,7 @@ The `routes` stage also has:
 | `exception` | error | A statement raised an error the game did not handle. |
 | `hang` | error | The game stopped making progress and was shut down. |
 | `engine-crash` | error | The engine process ended without explanation. |
-| `stuck` | warning | The game waited for something the tool cannot do, such as a minigame. |
+| `stuck` | info | The game waited for something the tool cannot do, such as a minigame. It was skipped and not tested. |
 | `loop` | warning | A path ran past the statement limit without ending. |
 | `undefined-image` | error | An image is shown that was never defined. Found by playing or by lint. |
 | `missing-file` | error | An image, audio or movie file the script uses cannot be loaded. Found by playing or by lint. |

@@ -18,9 +18,10 @@ def test_coverage_is_reported_per_file_and_per_label():
     coverage.add_map(MAP)
     coverage.add_executed(["label:start", "game/a.rpy#1"])
     report = coverage.report()
-    assert (report["executed"], report["total"]) == (2, 5)
+    assert (report["executed"], report["total"], report["low_confidence"]) == (2, 5, 0)
     assert report["files"] == {"game/a.rpy": [2, 3], "game/b.rpy": [0, 2]}
-    assert report["labels"]["start"] == {"file": "game/a.rpy", "line": 3, "executed": 2, "total": 3}
+    assert report["labels"]["start"] == {
+        "file": "game/a.rpy", "line": 3, "executed": 2, "low_confidence": 0, "total": 3}
     assert report["unreached_labels"] == ["other"]
     assert coverage.percent() == 40
 
@@ -59,3 +60,15 @@ def test_frontier_knows_what_is_waiting_and_where_the_current_path_is():
     assert [step["choice"] for step in frontier.path] == ["C"]
     assert frontier.last == {"file": "game/a.rpy", "line": 5}
     assert frontier.done is None
+
+
+@pytest.mark.req("EXP-014")
+def test_statements_reached_only_after_a_skip_are_counted_apart():
+    coverage = Coverage()
+    coverage.add_map(MAP)
+    coverage.add_executed(["label:start"], ["game/a.rpy#1", "label:other", "game/b.rpy#1"])
+    coverage.add_executed(["game/a.rpy#1"])
+    report = coverage.report()
+    assert (report["executed"], report["low_confidence"], report["total"]) == (2, 2, 5)
+    assert report["labels"]["other"]["low_confidence"] == 2
+    assert report["unreached_labels"] == []

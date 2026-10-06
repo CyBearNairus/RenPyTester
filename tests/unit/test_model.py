@@ -54,11 +54,11 @@ def test_json_report_is_complete_and_language_neutral(tmp_path):
     data = json.loads(english)
     assert data["schema_version"] == SCHEMA_VERSION
     assert data["settings"]["seed"] == 7
-    assert data["summary"] == {"error": 1, "warning": 0, "info": 0}
+    assert data["summary"] == {"error": 1, "warning": 0, "info": 0, "possible": 0}
     finding = data["findings"][0]
     expected = (
         "id", "class", "severity", "message_id", "params", "file", "line", "label", "stage", "language", "path",
-        "traceback", "count", "also")
+        "traceback", "count", "also", "possible")
     assert set(finding) == set(expected)
     assert i18n.t(finding["message_id"], **finding["params"]).startswith("The game crashed here")
     assert i18n.t(finding["message_id"], "pt-BR", **finding["params"]).startswith("O jogo quebrou aqui")
@@ -96,3 +96,34 @@ def test_report_name_has_the_game_and_the_time():
     assert report_name("Coração: Édition/2", when) == "report-coracao-edition-2-2026-10-06-143005"
     assert report_name("", when) == "report-game-2026-10-06-143005"
     assert report_name("日本語", when) == "report-game-2026-10-06-143005"
+
+
+@pytest.mark.req("EXP-012", "EXP-013", "RUN-021")
+def test_possible_issue_is_kept_apart_until_a_real_path_confirms_it():
+    report = Report("0", "game")
+    guessed = crash()
+    guessed.possible = True
+    report.add(guessed)
+    assert report.count(ERROR) == 0
+    assert report.count_possible() == 1
+    assert not report.failed(ERROR)
+    assert report.failed(ERROR, fail_on_possible=True)
+    assert report.to_dict()["summary"] == {"error": 0, "warning": 0, "info": 0, "possible": 1}
+    assert report.to_dict()["findings"][0]["possible"] is True
+
+    report.add(crash())
+    assert report.count(ERROR) == 1
+    assert report.count_possible() == 0
+    assert report.failed(ERROR)
+
+
+@pytest.mark.req("EXP-012", "LINT-002")
+def test_lint_confirms_a_possible_issue_at_the_same_line():
+    report = Report("0", "game")
+    guessed = crash()
+    guessed.possible = True
+    report.add(guessed)
+    report.add(Finding("missing-label", ERROR, "finding.lint", {"message": "x"}, "game/script.rpy", 13, stage="lint"))
+    report.merge_stages()
+    assert len(report.findings) == 1
+    assert report.findings[0].possible is False

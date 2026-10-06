@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Version 0.9 **approved** by the project owner on 2026-10-06. Version 0.10 amendments (from building M3b) await approval. |
+| Status | Version 0.10 **approved** by the project owner on 2026-10-06. Version 0.11 amendments (from building M3c) await approval. |
 | Last updated | 2026-10-06 |
 
 This document is the source of truth for what RenPyTester does.
@@ -159,7 +159,8 @@ The harness must get through a game with no human present.
 | RUN-018 | MUST | A hand-built interaction that offers nothing to activate and is not a screen call, such as a movie cutscene, is passed through like a pause (extends RUN-004). |
 | RUN-017 | MUST | A minigame or other interaction with nothing to activate does not end the path. The interaction is skipped: the tool never tries to play it, and instead continues the story after it with each plausible outcome (RUN-019). A `stuck` finding of severity *info* records that the interaction itself was not exercised. |
 | RUN-019 | MUST | Plausible outcomes of a skipped interaction are found by reading the script that follows it: the values its result, and any variable read there that the story has not set, are compared against in the conditions that come next (for example `if _return == "eileen"`), plus one value that matches none of them. Each outcome is explored as a separate branch from a snapshot, the same way menu choices are. |
-| RUN-020 | MUST | When no outcome can be inferred from the script, the story continues with a neutral result, and with each label that the surrounding script jumps or calls to after the interaction. |
+| RUN-020 | MUST | When no outcome can be inferred from the script, the story continues with a neutral result, and with each label that the script's next conditional blocks jump or call to. |
+| RUN-024 | MUST | Inference reads at most the next 40 statements after the interaction, follows up to three unconditional jumps, and stops at a menu or a return. It recognises the result being copied to another variable (`$ winner = _return`), comparisons with constants, membership in a list of constants, and use as a yes-or-no test. For a numeric comparison such as `score > 10` it tries the value and the values on either side of it. |
 | RUN-021 | MUST | Everything reached after a skipped interaction ran in a state the tool made up, so findings there are *possible issues* (EXP-013) and coverage there counts as low confidence (EXP-014), exactly as for label runs. A finding also reached by a path with no skipped interaction is confirmed (EXP-012). |
 | RUN-022 | SHOULD | The config file can state the outcome of a named interaction (for example "the `pong` screen returns `player`"), which replaces guessing and makes what follows normal, confirmed exploration. |
 | RUN-005 | MUST | Answer text input prompts with a configurable value (default `Tester`), honouring the prompt's length and allowed-character limits. |
@@ -450,7 +451,7 @@ The harness's Python version cannot be chosen with a virtual environment, becaus
 | M2 | Lint (**done** 2026-10-06) | Lint stage and finding merge. | LINT, ERR-010 |
 | M3a | Exploration (**done** 2026-10-06) | Branching with snapshots inside the game process, limits, coverage per file and label, continuing after crashes and hangs. | EXP-001–005, -016–018, RUN-006, -009–012, -023, ERR-006 |
 | M3b | Checks that need no rendering (**done** 2026-10-06) | Missing files, undefined images and malformed text found while playing, not only by lint. | ERR-003–005, -008, -012, -013 |
-| M3c | Getting past minigames | Skipping unplayable interactions and continuing with inferred outcomes. | RUN-017, -019–021 |
+| M3c | Getting past minigames (**done** 2026-10-06) | Skipping unplayable interactions and continuing with inferred outcomes. | RUN-017, -019–021, -024, EXP-012–014 (the parts that concern skipped interactions) |
 | M3d | Label runs | Starting at every label, and resolving those findings against normal exploration. | EXP-007, -011–015 |
 | M3e | Parallel processes | Several game processes exploring at once. | RUN-014–016 |
 | M4 | Translations | Language discovery and all TL MUSTs. | TL |
@@ -482,7 +483,7 @@ Open:
 
 | # | Question | Recommendation |
 | --- | --- | --- |
-| D14 | Approve the version 0.10 amendments: ERR-012 and ERR-013 added, ERR-008 exempts menus that use a set. | Approve. |
+| D15 | Approve the version 0.11 amendments: RUN-024 added, RUN-020 made precise. | Approve. |
 
 Settled on 2026-10-06:
 
@@ -494,6 +495,7 @@ Settled on 2026-10-06:
 | D4 | Untranslated lines are warnings. |
 | D5 | Label runs are on by default, run alongside normal exploration, and their findings are filtered against it and reported separately as possible issues (EXP-007, -011 to -015). |
 | D9 | Version 0.5 amendments approved (the owner approved and committed M1). |
+| D14 | Version 0.10 amendments approved: checks made while playing (ERR-012, ERR-013, ERR-008). |
 | D13 | Version 0.9 amendments approved: exploration rules (EXP-016 to EXP-018), RUN-023, and milestone M3 split into five parts. |
 | D12 | Version 0.8 amendments approved: lint rules made precise and reports named after the game and run time (LINT-002, -004, -005, REP-009). |
 | D11 | Version 0.7 amendments approved: minigames are skipped and the story continues with inferred outcomes (RUN-017, RUN-019 to RUN-022). |
@@ -518,3 +520,4 @@ Settled on 2026-10-06:
 | 2026-10-06 | 0.8 | M2 built. D11 settled (0.7 approved). LINT-002 made precise; added LINT-004 and LINT-005. `--stages` (CLI-002) delivered early, in M2. Added REP-009: reports named after the game and the time of the run. |
 | 2026-10-06 | 0.9 | First part of M3 built. D12 settled (0.8 approved). Added EXP-016 to EXP-018 and RUN-023; made RUN-012 and EXP-003 precise; split M3 into M3a to M3e. |
 | 2026-10-06 | 0.10 | M3b built. D13 settled (0.9 approved). Added ERR-012 and ERR-013; ERR-008 exempts menus that use a set. |
+| 2026-10-06 | 0.11 | M3c built. D14 settled (0.10 approved). Added RUN-024; RUN-020 made precise. Possible issues and low-confidence coverage (EXP-012 to EXP-014) built for skipped interactions; label runs will reuse them. |

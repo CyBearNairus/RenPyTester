@@ -43,6 +43,7 @@ class Options:
     max_depth: int = 500
     show_window: bool = False
     fail_on: str = ERROR
+    fail_on_possible: bool = False
     stages: tuple = STAGES
 
 
@@ -92,7 +93,8 @@ def load_failure(text, stage):
 def to_finding(event, stage):
     return Finding(
         event["cls"], event["severity"], event["message_id"], event.get("params") or {}, event.get("file"),
-        event.get("line"), event.get("label"), stage, None, event.get("path") or [], event.get("traceback"))
+        event.get("line"), event.get("label"), stage, None, event.get("path") or [], event.get("traceback"),
+        possible=bool(event.get("possible")))
 
 
 def collect_engine_files(game, output_dir):
@@ -132,7 +134,7 @@ def run(options, on_progress=None):
         "strategy": options.strategy, "seed": options.seed, "timeout": options.timeout,
         "input_value": options.input_value, "max_steps": options.max_steps, "max_paths": options.max_paths,
         "max_time": options.max_time, "max_depth": options.max_depth, "show_window": options.show_window,
-        "fail_on": options.fail_on, "stages": list(options.stages),
+        "fail_on": options.fail_on, "fail_on_possible": options.fail_on_possible, "stages": list(options.stages),
     }
     report = Report(__version__, str(game.basedir), game.kind, settings=settings, started=now())
     report.game = {"renpy_version": ".".join(str(i) for i in game.renpy_version) or None}

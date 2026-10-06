@@ -18,6 +18,8 @@
 init 999 python hide:
 
     def _renpytester_install():
+        import ast as pyast
+        import builtins
         import io
         import json
         import os
@@ -81,6 +83,10 @@ init 999 python hide:
             "started_at": time.time(),
             "last_beat": time.time(),
             "finished": False,
+            # True once the path has skipped an interaction it could not play: what follows is a guess.
+            "speculative": False,
+            "executed_low": set(),
+            "unreported_low": [],
         }
 
         # ------------------------------------------------------------------------------- helpers
@@ -100,11 +106,13 @@ init 999 python hide:
             return location(renpy.game.context().current)
 
         def node_id(node):
-            # Stable between processes running the same compiled script, so coverage can be merged.
+            # Stable between processes running the same compiled script, so coverage can be merged, and
+            # unique within the game: some engine versions name every translation block in a file alike
+            # in the last part of the name, so the whole name is used.
             name = node.name
             if isinstance(name, str):
                 return "label:" + name
-            return "%s#%s" % (node.filename.replace("\\", "/"), name[-1])
+            return "%s#%s" % (node.filename.replace("\\", "/"), "|".join(str(part) for part in name[1:]))
 
         def story_statements():
             """Statements a playthrough could execute (spec EXP-005), as a name -> node mapping."""
@@ -117,8 +125,10 @@ init 999 python hide:
                 if hasattr(node, "get_children"):
                     node.get_children(mark)
 
+            # "Translate" is the wrapper older engines put around each line of dialogue; the line inside
+            # it is the statement, and counting both would make coverage differ between engine versions.
             not_story = (
-                "Testcase", "EndTranslate", "TranslateString", "TranslatePython", "TranslateBlock",
+                "Testcase", "Translate", "EndTranslate", "TranslateString", "TranslatePython", "TranslateBlock",
                 "TranslateEarlyBlock", "Init", "EarlyPython")
 
             found = {}
@@ -185,6 +195,10 @@ init 999 python hide:
             rv, state["unreported"] = state["unreported"], []
             return rv
 
+        def take_unreported_low():
+            rv, state["unreported_low"] = state["unreported_low"], []
+            return rv
+
         def indices():
             return [i["index"] for i in state["path"]]
 
@@ -196,7 +210,8 @@ init 999 python hide:
                 filename, line = here()
             emit(
                 "finding", cls=cls, severity=severity, message_id=message_id, params=params, file=filename,
-                line=line, label=state["label"], path=list(state["path"]), traceback=trace)
+                line=line, label=state["label"], path=list(state["path"]), traceback=trace,
+                possible=state["speculative"] and cls != "stuck")
 
         # ---------------------------------------------------------- snapshots (EXP-002, RUN-010)
 
@@ -221,7 +236,7 @@ init 999 python hide:
                 state["finished"] = True
                 emit(
                     "done", steps=state["steps"], interactions=state["interactions"], paths=state["paths"],
-                    covered=take_unreported(), limit=state["limit"])
+                    covered=take_unreported(), covered_low=take_unreported_low(), limit=state["limit"])
             original_quit()
 
         def out_of_budget():
@@ -236,6 +251,7 @@ init 999 python hide:
             state["taken"] = {}
             state["label"] = None
             state["replay"] = list(prefix)
+            state["speculative"] = False
             emit("branch_start", prefix=list(prefix), path=[])
 
         def next_path(reason):
@@ -243,7 +259,9 @@ init 999 python hide:
             state["paths"] += 1
             state["forced"] = None
             state["replay"] = None
-            emit("path_end", reason=reason, path=list(state["path"]), covered=take_unreported())
+            emit(
+                "path_end", reason=reason, path=list(state["path"]), covered=take_unreported(),
+                covered_low=take_unreported_low())
 
             limit = out_of_budget()
             if limit and waiting():
@@ -255,6 +273,7 @@ init 999 python hide:
                 state["path"] = entry["path"]
                 state["taken"] = entry["taken"]
                 state["label"] = entry["label"]
+                state["speculative"] = entry["speculative"]
                 state["forced"] = entry["index"]
                 random.setstate(entry["random"])
                 emit("branch_start", prefix=indices() + [entry["index"]], path=list(state["path"]))
@@ -315,7 +334,8 @@ init 999 python hide:
                         state["stack"].append({
                             "snapshot": data, "index": i, "path": list(state["path"]),
                             "taken": dict((k, set(v)) for k, v in state["taken"].items()),
-                            "label": state["label"], "random": random.getstate()})
+                            "label": state["label"], "random": random.getstate(),
+                            "speculative": state["speculative"]})
                         emit("branch", prefix=indices() + [i])
 
             state["scheduled"].add(keys[pick])
@@ -341,7 +361,11 @@ init 999 python hide:
                     # The first statement of the story: the point every handed-over path starts from.
                     state["need_root"] = False
                     state["root"] = {"snapshot": snapshot(), "random": random.getstate()}
-                if name not in state["executed"]:
+                if state["speculative"]:
+                    if name not in state["executed"] and name not in state["executed_low"]:
+                        state["executed_low"].add(name)
+                        state["unreported_low"].append(node_id(node))
+                elif name not in state["executed"]:
                     state["executed"].add(name)
                     state["unreported"].append(node_id(node))
                 if is_public_label(node):
@@ -354,11 +378,13 @@ init 999 python hide:
                     filename, line = location(name)
                     emit(
                         "heartbeat", file=filename, line=line, steps=state["steps"], paths=state["paths"],
-                        waiting=waiting(), covered=take_unreported())
+                        waiting=waiting(), covered=take_unreported(), covered_low=take_unreported_low())
                     if state["starts"] and now - state["started_at"] > max_time:
                         state["limit"] = {"kind": "max_time", "unexplored": waiting()}
                         state["paths"] += 1
-                        emit("path_end", reason="max_time", path=list(state["path"]), covered=take_unreported())
+                        emit(
+                            "path_end", reason="max_time", path=list(state["path"]), covered=take_unreported(),
+                            covered_low=take_unreported_low())
                         finish()
 
             if state["path_steps"] > max_steps:
@@ -382,6 +408,174 @@ init 999 python hide:
                 state["interact_type"] = previous
 
         renpy.ui.interact = ui_interact
+
+        # --------------------------------- getting past minigames (RUN-017, RUN-019 to RUN-021)
+        #
+        # An interaction with nothing to click, such as a minigame, cannot be played. It is skipped, and
+        # the story is continued once for each result the script goes on to check for.
+
+        OTHER = "renpytester-other"
+
+        def known_name(name):
+            return hasattr(store, name) or hasattr(builtins, name)
+
+        def add_value(found, name, value):
+            values = found.setdefault(name, [])
+            if not [v for v in values if type(v) is type(value) and v == value]:
+                values.append(value)
+
+        def condition_values(source, tracked, found):
+            """Adds to `found` the values that a condition compares each interesting name against."""
+            try:
+                tree = pyast.parse(str(source).strip(), mode="eval")
+            except Exception:
+                return
+
+            def interesting(node):
+                return isinstance(node, pyast.Name) and (node.id in tracked or not known_name(node.id))
+
+            def constants(node):
+                if isinstance(node, pyast.Constant):
+                    return [node.value]
+                if isinstance(node, (pyast.Tuple, pyast.List, pyast.Set)):
+                    return [e.value for e in node.elts if isinstance(e, pyast.Constant)]
+                return []
+
+            def truth(node):
+                # A name used as a yes-or-no test: both answers are worth trying.
+                if isinstance(node, pyast.Name):
+                    if interesting(node):
+                        add_value(found, node.id, True)
+                        add_value(found, node.id, False)
+                elif isinstance(node, pyast.UnaryOp) and isinstance(node.op, pyast.Not):
+                    truth(node.operand)
+                elif isinstance(node, pyast.BoolOp):
+                    for value in node.values:
+                        truth(value)
+                elif isinstance(node, pyast.Attribute):
+                    truth(node.value)
+
+            truth(tree.body)
+
+            ordering = (pyast.Lt, pyast.LtE, pyast.Gt, pyast.GtE)
+            for node in pyast.walk(tree):
+                if not isinstance(node, pyast.Compare):
+                    continue
+                sides = [node.left] + list(node.comparators)
+                values = [v for side in sides for v in constants(side)]
+                ordered = [op for op in node.ops if isinstance(op, ordering)]
+                for side in sides:
+                    if not interesting(side):
+                        continue
+                    for value in values:
+                        add_value(found, side.id, value)
+                        if ordered and isinstance(value, (int, float)) and not isinstance(value, bool):
+                            add_value(found, side.id, value + 1)
+                            add_value(found, side.id, value - 1)
+
+        def look_ahead(node):
+            """Reads the script after `node`: what the interaction's result is compared against, and where
+            the script may jump. Returns (values for the result, values for other names, labels)."""
+            tracked = set(["_return"])
+            found = {}
+            labels = []
+            followed = 0
+            node = node.next
+
+            for _step in range(40):
+                if node is None:
+                    break
+                kind = type(node).__name__
+
+                if kind == "If":
+                    for condition, block in node.entries:
+                        condition_values(condition, tracked, found)
+                        for child in block:
+                            target = getattr(child, "target", None) or getattr(child, "label", None)
+                            if type(child).__name__ in ("Jump", "Call") and not child.expression and target:
+                                if target not in labels:
+                                    labels.append(target)
+                elif kind == "While":
+                    condition_values(node.condition, tracked, found)
+                elif kind == "Python":
+                    # "$ winner = _return": from here on, that name stands for the result too.
+                    try:
+                        for statement in pyast.parse(node.code.source).body:
+                            copied = isinstance(statement, pyast.Assign) and isinstance(statement.value, pyast.Name)
+                            if copied and statement.value.id in tracked:
+                                for target in statement.targets:
+                                    if isinstance(target, pyast.Name):
+                                        tracked.add(target.id)
+                    except Exception:
+                        pass
+                elif kind == "Jump" and not node.expression and followed < 3:
+                    followed += 1
+                    node = renpy.game.script.namemap.get(node.target)
+                    continue
+                elif kind in ("Return", "Menu"):
+                    break
+
+                node = node.next
+
+            results = []
+            others = {}
+            for name, values in found.items():
+                for value in values:
+                    if name in tracked:
+                        if not [v for v in results if type(v) is type(value) and v == value]:
+                            results.append(value)
+                    else:
+                        add_value(others, name, value)
+            return results, others, labels
+
+        def describe(outcome):
+            if "jump" in outcome:
+                return "jump " + outcome["jump"]
+            parts = ["result = %r" % (outcome["result"],)]
+            parts.extend("%s = %r" % (name, value) for name, value in sorted(outcome["set"].items()))
+            return ", ".join(parts)
+
+        def outcomes_after(node):
+            results, others, labels = look_ahead(node)
+            defaults = dict((name, values[0]) for name, values in others.items())
+            outcomes = []
+
+            if results:
+                # One more result that matches nothing the script checks for, for its "else".
+                if not (True in results and False in results and len(results) == 2):
+                    results = results + [OTHER if [v for v in results if v is None] else None]
+                outcomes = [{"result": value, "set": defaults} for value in results]
+            elif others:
+                outcomes = [{"result": None, "set": defaults}]
+
+            for name, values in sorted(others.items()):
+                for value in values[1:]:
+                    changed = dict(defaults)
+                    changed[name] = value
+                    outcomes.append({"result": outcomes[0]["result"], "set": changed})
+
+            if not outcomes:
+                # Nothing to go on (RUN-020): carry on with no result, and try each place the script
+                # may go from here.
+                outcomes = [{"result": None, "set": {}}]
+                outcomes.extend({"jump": label} for label in labels if renpy.has_label(label))
+
+            return outcomes
+
+        def skip_interaction(ctx):
+            """Gets past an interaction that cannot be played, by deciding how it turned out."""
+            finding("stuck", "info", "finding.stuck", {})
+            node = renpy.game.script.namemap.get(ctx.current)
+            outcomes = outcomes_after(node) if node is not None else [{"result": None, "set": {}}]
+            outcome = outcomes[choose("skip", [describe(o) for o in outcomes])]
+
+            # From here on the game is in a state the tool made up (RUN-021).
+            state["speculative"] = True
+            if "jump" in outcome:
+                renpy.jump(outcome["jump"])
+            for name, value in outcome["set"].items():
+                setattr(store, name, value)
+            return outcome["result"]
 
         def screen_buttons(ctx):
             found = []
@@ -420,8 +614,7 @@ init 999 python hide:
                 value = renpy.run(buttons[pick][1].action)
                 if value is not None:
                     return value
-            finding("stuck", "warning", "finding.stuck", {})
-            next_path("stuck")
+            return skip_interaction(ctx)
 
         passive = (None, "say", "pause", "with", "nvl", "movie")
 

@@ -15,6 +15,8 @@ class Coverage:
         self.files = {}
         self.labels = {}
         self.executed = set()
+        # Statements reached only in a state the tool made up, after a skipped interaction (EXP-014).
+        self.low = set()
 
     def add_map(self, script_map):
         for filename, ids in script_map.get("files", {}).items():
@@ -23,8 +25,13 @@ class Coverage:
             entry = self.labels.setdefault(name, {"file": label["file"], "line": label["line"], "ids": set()})
             entry["ids"].update(label["ids"])
 
-    def add_executed(self, ids):
+    def add_executed(self, ids, low=()):
         self.executed.update(ids or ())
+        self.low.update(low or ())
+
+    @property
+    def low_count(self):
+        return sum(len((ids & self.low) - self.executed) for ids in self.files.values())
 
     @property
     def total(self):
@@ -44,12 +51,13 @@ class Coverage:
         for name, label in self.labels.items():
             labels[name] = {
                 "file": label["file"], "line": label["line"], "executed": len(label["ids"] & self.executed),
-                "total": len(label["ids"])}
+                "low_confidence": len((label["ids"] & self.low) - self.executed), "total": len(label["ids"])}
         unreached = sorted(
-            (name for name, label in labels.items() if not label["executed"]),
+            (name for name, label in labels.items() if not label["executed"] and not label["low_confidence"]),
             key=lambda name: (labels[name]["file"], labels[name]["line"]))
         return {
             "executed": self.count,
+            "low_confidence": self.low_count,
             "total": self.total,
             "files": {f: [len(ids & self.executed), len(ids)] for f, ids in sorted(self.files.items())},
             "labels": dict(sorted(labels.items())),
@@ -77,7 +85,7 @@ class Frontier:
     def feed(self, event):
         kind = event["ev"]
         if "covered" in event:
-            self.coverage.add_executed(event["covered"])
+            self.coverage.add_executed(event["covered"], event.get("covered_low"))
         if event.get("steps") is not None:
             self.steps = event["steps"]
 
