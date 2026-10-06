@@ -24,7 +24,7 @@ packages = ["renpytester", "renpytester.report"]
 version = { attr = "renpytester.__version__" }
 
 [tool.setuptools.package-data]
-renpytester = ["harness/*.rpy", "locale/*.json"]
+renpytester = ["harness/*.rpy", "harness/*.py", "locale/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

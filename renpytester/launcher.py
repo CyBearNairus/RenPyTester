@@ -8,6 +8,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+SILENT_EDITOR = Path(__file__).resolve().parent / "harness" / "silent_editor.py"
+
 
 @dataclass
 class EngineRun:
@@ -26,6 +28,8 @@ def build_environment(events_file, settings, log_dir, show_window=False):
     env["RENPY_LOG_BASE"] = str(log_dir)
     # No copy of the scripts into the user's profile (SAFE-014). The engine requires this exact text.
     env["RENPY_DISABLE_BACKUPS"] = "I take responsibility for this."
+    # The engine opens error reports in the system text editor; give it an editor that opens nothing (GAME-010).
+    env["RENPY_EDIT_PY"] = str(SILENT_EDITOR)
     # Errors are printed and the engine exits, instead of opening an interactive error screen.
     env["RENPY_SIMPLE_EXCEPTIONS"] = "1"
     # No "your graphics are slow" prompt, and straight into a new game (RUN-001).

@@ -6,7 +6,7 @@ Runnable from source with plain Python or as a single-file executable, from a te
 ## Current state
 
 **Milestones M0 (spikes) and M1 (walking skeleton) are done. Milestone M2 (lint stage) is next.**
-[docs/SPEC.md](docs/SPEC.md) version 0.4 is approved; the 0.5 amendments that came out of building M1 are waiting for the owner's approval (decision D9 in spec section 9.2).
+[docs/SPEC.md](docs/SPEC.md) version 0.6 is approved, with no open decisions.
 What works today: `python -m renpytester GAME` finds the game and its engine and plays one path with no window.
 It reports crashes and script errors on the console and in `report.json`, in English or Brazilian Portuguese.
 It leaves the game folder byte-for-byte unchanged.
@@ -47,6 +47,9 @@ The ones that cause real damage if forgotten:
   Dev tools are fine as dev dependencies.
 - **The game is never visible.** No game window, no audio, no focus stealing during a run.
   The game runs at high speed, so a visible window flashes: treat any change that could show one as a safety bug, not a cosmetic one.
+- **Nothing else may appear on screen either.**
+  A failing game makes the engine open `traceback.txt` or `errors.txt` in the system text editor (Notepad).
+  Every engine launch, including spikes and tests, must set `RENPY_EDIT_PY` to `renpytester/harness/silent_editor.py`; launch the engine only through `renpytester.launcher` or `spikes/run.py`, which do.
 - **Every user-facing string goes through the message catalogue** in English and Brazilian Portuguese.
   No hard-coded text in console, GUI or HTML output.
   Machine-readable output (JSON keys, finding classes, exit codes) stays language-neutral.

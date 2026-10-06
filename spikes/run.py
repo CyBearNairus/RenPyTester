@@ -59,6 +59,9 @@ def main():
         SDL_AUDIODRIVER="dummy",
     )
     env["RENPY_DISABLE_BACKUPS"] = "I take responsibility for this."
+    # Without this the engine opens traceback.txt in Notepad whenever a spike fails.
+    env["RENPY_EDIT_PY"] = str(ROOT / "renpytester" / "harness" / "silent_editor.py")
+    env["RENPY_SIMPLE_EXCEPTIONS"] = "1"
 
     python = sdk / "lib" / "py3-windows-x86_64" / "python.exe"
     cmd = [str(python), str(sdk / "renpy.py"), str(game), args.command, "--savedir", str(run_dir / "saves")]

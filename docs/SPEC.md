@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Version 0.4 **approved** by the project owner on 2026-10-06. Version 0.5 amendments (from building M1) await approval. |
+| Status | **Approved**, version 0.6, by the project owner on 2026-10-06 |
 | Last updated | 2026-10-06 |
 
 This document is the source of truth for what RenPyTester does.
@@ -121,6 +121,7 @@ The orchestrator launches, supervises and divides work between processes; it doe
 | GAME-005 | MUST | If no usable engine can be found, exit with code 3 and a message that says exactly what was looked for and how to supply an SDK. |
 | GAME-006 | MUST | Detect and report the game's Ren'Py version, Python major version, game name and version, and the list of available languages, before any stage runs. |
 | GAME-007 | MUST | Every game process runs with no visible window, no taskbar or dock entry where the platform allows, no audio output and no focus stealing (ARCH-006). If this cannot be achieved on the current platform and engine version, the run stops with an explanation, and continues only if the user passes `--show-window` after a photosensitivity warning. |
+| GAME-010 | MUST | The engine never opens a file in another program during a run. By default Ren'Py opens `traceback.txt` or `errors.txt` in the system text editor when a game fails; this is suppressed, and the same files are kept in the output directory instead (REP-008). |
 | GAME-008 | SHOULD | `--sdk` may be used with a built distribution to override the bundled engine. |
 | GAME-009 | COULD | `--download-sdk VERSION` fetches a matching SDK into a cache directory. |
 
@@ -455,11 +456,7 @@ Still unverified, and the requirements that depend on them:
 
 ### 9.2 Decisions
 
-Open:
-
-| # | Question | Recommendation |
-| --- | --- | --- |
-| D9 | Approve the version 0.5 amendments: EXP-006 clarified (revisited decision points), RUN-018, CLI-011, and the package at the repository root. | Approve. They record how M1 was built. |
+No decisions are open.
 
 Settled on 2026-10-06:
 
@@ -470,6 +467,8 @@ Settled on 2026-10-06:
 | D3 | Python 2 engines (Ren'Py 7 and older) are out of scope for now. Doki Doki Literature Club is dropped as a reference game. |
 | D4 | Untranslated lines are warnings. |
 | D5 | Label runs are on by default, run alongside normal exploration, and their findings are filtered against it and reported separately as possible issues (EXP-007, -011 to -015). |
+| D9 | Version 0.5 amendments approved (the owner approved and committed M1). |
+| D10 | Error files must not open in a text editor during a run (GAME-010), requested by the owner after seeing it happen during development. |
 | D8 | Version 0.4 amendments approved (the owner committed M0 and asked for M1). |
 | D6 | The HTML report is required for 1.0 and must be concise (REP-004). |
 | D7 | Command name `renpytester`. Interface in English and Brazilian Portuguese (4.15). |
@@ -485,3 +484,4 @@ Settled on 2026-10-06:
 | 2026-10-06 | 0.3 | D5 settled: label runs on by default alongside normal exploration, resolved and reported as possible issues (EXP-007 now MUST, EXP-011 to -015 added). Markdown lint requirement (NFR-008); tables reformatted to pass it. |
 | 2026-10-06 | 0.4 | M0 spike results. Added ARCH-007, ARCH-008, SAFE-013, SAFE-014, RUN-017, NFR-009 (code lint). Reworded SAFE-001. Clarified EXP-005 and LINT-001. Section 9.1 replaced by a pointer to SPIKES.md and the four assumptions still unverified. |
 | 2026-10-06 | 0.5 | M1 built. EXP-006 clarified. Added RUN-018 and CLI-011. Planned structure updated to the package at the repository root. D8 settled. |
+| 2026-10-06 | 0.6 | D9 settled (0.5 approved). Added GAME-010: the engine must not open error files in a text editor. |

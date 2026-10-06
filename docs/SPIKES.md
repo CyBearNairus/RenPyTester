@@ -60,6 +60,8 @@ The Tutorial number is from a naive explorer that writes an event per decision a
    `RENPY_LOG_BASE` moves the logs and `RENPY_DISABLE_BACKUPS` stops the backup.
    The cache files and the `saves` folder have to be restored or removed by the orchestrator.
 8. **Useful engine switches found:** `RENPY_SKIP_MAIN_MENU`, `RENPY_SKIP_SPLASHSCREEN`, `RENPY_PERFORMANCE_TEST=0`, `RENPY_LOG_BASE`, `--savedir`.
+   Found later, while building M1: `RENPY_SIMPLE_EXCEPTIONS` stops the interactive error screen, and `RENPY_EDIT_PY` replaces the editor.
+   Without the second one, a failing game run with the `run` command opens `traceback.txt` or `errors.txt` in the system text editor, which is Notepad on Windows.
 9. **Coverage needs a definition of "statement".**
    Init-time code, other languages' translation blocks, test cases and the implicit `return` at the end of each file must be left out of the total.
 10. **Minigames end a path as "stuck".**
