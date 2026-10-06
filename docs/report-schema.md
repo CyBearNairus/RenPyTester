@@ -3,6 +3,7 @@
 RenPyTester writes one JSON report per run into the output folder (spec REP-002).
 The file is named `report-<game name>-<yyyy-mm-dd>-<hhmmss>.json`, in local time, so earlier reports are never overwritten (spec REP-009).
 This document describes schema version 1.
+The same run also writes a JUnit report (`.xml`) and an HTML report (`.html`) under the same name; both are made from this data and nothing else (spec REP-010).
 The file is UTF-8, and nothing in it depends on the interface language (spec I18N-003).
 
 `schema_version` increases whenever a field is removed, renamed or changes meaning.
@@ -15,11 +16,14 @@ Adding a field does not change it, so readers should ignore fields they do not k
 | `schema_version` | integer | `1` |
 | `tool` | object | `name` (`"renpytester"`) and `version`. |
 | `complete` | boolean | `false` when the run was cut short. A report that is not complete proves nothing about what it does not list. |
+| `interrupted` | boolean | `true` when the user stopped the run. The report then has what was found until that moment. |
+| `name` | string | The name the run's files are saved under, without an extension. |
 | `started`, `finished` | string | ISO 8601 timestamps in UTC. |
 | `game` | object | See below. |
-| `settings` | object | The settings the run used, including `seed`, so the run can be repeated. `jobs` is the number of game processes that were allowed to run at once. `languages` is the list given with `--languages`, or `null` when every language was to be checked. |
+| `settings` | object | The settings the run used, including `seed`, so the run can be repeated. `jobs` is the number of game processes that were allowed to run at once. `languages` is the list given with `--languages`, or `null` when every language was to be checked. `config` is the settings file that was used, or `null`, and `severity`, `ignore`, `inputs`, `variables` and `exclude_labels` are what it asked for. `baseline` is the earlier report that findings were compared with, or `null`. |
 | `stages` | object | One entry per stage, keyed by stage name. See below. |
-| `summary` | object | Number of confirmed findings per severity (`error`, `warning`, `info`), and `possible`, the number of possible issues of any severity. |
+| `summary` | object | Number of confirmed findings per severity (`error`, `warning`, `info`), and `possible`, the number of possible issues of any severity. Also `ignored`, the number of findings left out by the ignore rules of the settings file, and `known`, the number left out because the baseline report already had them (`null` when no baseline was given). Findings that were left out are not in `findings` and not in the other sums. |
+| `ignored_by` | array | One entry for each ignore rule, in the order of the settings file: `rule`, the rule as written, and `count`, how many findings it left out. |
 | `coverage` | object or null | See below. `null` when the game never started. |
 | `statistics` | object | `statements` and `interactions` executed, and `script`: what lint counted (see below). |
 | `notes` | array | Things worth knowing that are not problems in the game. Each has `message_id` and `params`. |
@@ -58,6 +62,7 @@ Each stage has a `status`:
 | `not_selected` | The stage was left out with `--stages`. |
 | `failed` | The stage could not finish, for a reason given in `reason`. The report is then not complete. |
 | `not_implemented` | This version of RenPyTester does not have the stage yet. It was not checked. |
+| `interrupted` | The user stopped the run before the stage finished. The report is then not complete. |
 
 The `lint` stage also has `findings` (how many it produced) and, on engine versions that lack some lint checks, `unsupported_options`.
 
@@ -67,6 +72,7 @@ The `routes` stage also has:
 - `end_reasons`: how many paths ended for each reason (`end`, `quit`, `exception`, `stuck`, `loop`, `exhausted`, `hang`, `engine-crash`, `max_time`, and `label end` for a label run that reached another label).
 - `label_runs`: how many labels were played by themselves. Absent when label runs were turned off.
 - `possible_dropped`: how many possible issues were left out of the report because the story itself played the same statement without that problem.
+- `excluded_labels`: present only when the settings file excludes labels: the names of the labels that were not played and not counted in the coverage.
 - `launches`: how many times the game was started for this stage.
 - `jobs`: how many game processes explored at the same time. When `launches` is greater than `jobs`, a process died or hung and another carried on from it.
   The first process explores the story and keeps its logs in the log folder itself; each of the others plays label runs and keeps its logs in a subfolder named `labels-1`, `labels-2` and so on.

@@ -124,7 +124,8 @@ def test_console_lists_a_few_untranslated_lines_for_each_language_and_counts_the
         report.add(untranslated(line, "french"))
 
     stream = io.StringIO()
-    Console(stream).summary(report, tmp_path / "report.json", failed=False)
+    paths = {name: tmp_path / ("report." + name) for name in ("json", "html", "junit")}
+    Console(stream).summary(report, paths, failed=False)
     text = stream.getvalue()
 
     assert text.count("has no portuguese translation") == UNTRANSLATED_SHOWN

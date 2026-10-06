@@ -1,0 +1,14 @@
+# Settings for testing this fixture game (spec 4.11).
+
+seed = 5
+
+# Labels that are not to be played. A call to one returns at once, and a jump to one ends the story.
+exclude_labels = ["arcade", "credits_*"]
+
+# What to type at particular prompts. Other prompts get the usual value.
+[inputs]
+"What is the door code?" = "4721"
+
+# Values that variables of the game have when the story starts.
+[variables]
+tickets = 2

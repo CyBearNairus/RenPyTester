@@ -54,7 +54,7 @@ def test_json_report_is_complete_and_language_neutral(tmp_path):
     data = json.loads(english)
     assert data["schema_version"] == SCHEMA_VERSION
     assert data["settings"]["seed"] == 7
-    assert data["summary"] == {"error": 1, "warning": 0, "info": 0, "possible": 0}
+    assert data["summary"] == {"error": 1, "warning": 0, "info": 0, "possible": 0, "ignored": 0, "known": None}
     finding = data["findings"][0]
     expected = (
         "id", "class", "severity", "message_id", "params", "file", "line", "label", "stage", "language", "path",
@@ -108,7 +108,8 @@ def test_possible_issue_is_kept_apart_until_a_real_path_confirms_it():
     assert report.count_possible() == 1
     assert not report.failed(ERROR)
     assert report.failed(ERROR, fail_on_possible=True)
-    assert report.to_dict()["summary"] == {"error": 0, "warning": 0, "info": 0, "possible": 1}
+    assert report.to_dict()["summary"]["possible"] == 1
+    assert report.to_dict()["summary"]["error"] == 0
     assert report.to_dict()["findings"][0]["possible"] is True
 
     report.add(crash())

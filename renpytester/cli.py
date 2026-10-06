@@ -2,19 +2,22 @@
 
 import argparse
 import sys
+import tempfile
 import traceback
 
-from renpytester import __version__, i18n, runner
-from renpytester.errors import ToolError, UsageError
+from renpytester import __version__, config, discovery, i18n, report, runner
+from renpytester.errors import ToolError
 from renpytester.i18n import t
 from renpytester.model import ERROR, SEVERITIES
-from renpytester.report import json_report
 from renpytester.report.console import Console
 
 EXIT_OK = 0
 EXIT_FINDINGS = 1
 EXIT_USAGE = 2
 EXIT_TOOL = 3
+
+# The command that only says what the game is (CLI-008).
+INFO = "info"
 
 
 def language_from(argv):
@@ -28,47 +31,112 @@ def language_from(argv):
 
 
 def build_parser():
+    """The options of a run. None of them has a default here: one that was not given is left to the
+    config file, and then to the defaults of runner.Options, which the help text quotes (CFG-002)."""
     defaults = runner.Options(game="")
-    parser = argparse.ArgumentParser(prog="renpytester", description=t("cli.description"))
+    parser = argparse.ArgumentParser(prog="renpytester", description=t("cli.description"), epilog=t("cli.epilog"))
     parser.add_argument("game", metavar="GAME", help=t("cli.game"))
     parser.add_argument("--sdk", metavar="PATH", help=t("cli.sdk"))
+    parser.add_argument("--config", metavar="FILE", help=t("cli.config", name=config.FILE_NAME))
+    parser.add_argument("--output", metavar="DIR", help=t("cli.output", default=defaults.output))
+    parser.add_argument("--baseline", metavar="REPORT", help=t("cli.baseline"))
     parser.add_argument(
-        "--output", metavar="DIR", default=defaults.output, help=t("cli.output", default=defaults.output))
-    parser.add_argument(
-        "--stages", metavar="LIST", default=",".join(defaults.stages),
+        "--stages", metavar="LIST",
         help=t("cli.stages", default=",".join(defaults.stages), all=", ".join(runner.STAGES)))
     parser.add_argument(
-        "--strategy", choices=["explore", "first"], default=defaults.strategy,
-        help=t("cli.strategy", default=defaults.strategy))
+        "--strategy", choices=config.STRATEGIES, help=t("cli.strategy", default=defaults.strategy))
     parser.add_argument("--languages", metavar="LIST", help=t("cli.languages"))
-    parser.add_argument("--no-labels", action="store_true", help=t("cli.no_labels"))
+    parser.add_argument("--no-labels", action="store_true", default=None, help=t("cli.no_labels"))
     parser.add_argument("--jobs", type=int, metavar="N", help=t("cli.jobs"))
+    parser.add_argument("--max-paths", type=int, metavar="N", help=t("cli.max_paths", default=defaults.max_paths))
     parser.add_argument(
-        "--max-paths", type=int, default=defaults.max_paths, metavar="N",
-        help=t("cli.max_paths", default=defaults.max_paths))
+        "--max-time", type=float, metavar="SECONDS", help=t("cli.max_time", default=int(defaults.max_time)))
+    parser.add_argument("--max-depth", type=int, metavar="N", help=t("cli.max_depth", default=defaults.max_depth))
+    parser.add_argument("--seed", type=int, help=t("cli.seed", default=defaults.seed))
     parser.add_argument(
-        "--max-time", type=float, default=defaults.max_time, metavar="SECONDS",
-        help=t("cli.max_time", default=int(defaults.max_time)))
-    parser.add_argument(
-        "--max-depth", type=int, default=defaults.max_depth, metavar="N",
-        help=t("cli.max_depth", default=defaults.max_depth))
-    parser.add_argument("--seed", type=int, default=defaults.seed, help=t("cli.seed", default=defaults.seed))
-    parser.add_argument(
-        "--timeout", type=float, default=defaults.timeout, metavar="SECONDS",
-        help=t("cli.timeout", default=int(defaults.timeout)))
-    parser.add_argument(
-        "--input-value", default=defaults.input_value, metavar="TEXT",
-        help=t("cli.input_value", default=defaults.input_value))
-    parser.add_argument(
-        "--max-steps", type=int, default=defaults.max_steps, metavar="N",
-        help=t("cli.max_steps", default=defaults.max_steps))
-    parser.add_argument(
-        "--fail-on", choices=[*SEVERITIES, "never"], default=ERROR, help=t("cli.fail_on", default=ERROR))
-    parser.add_argument("--fail-on-possible", action="store_true", help=t("cli.fail_on_possible"))
-    parser.add_argument("--show-window", action="store_true", help=t("cli.show_window"))
+        "--timeout", type=float, metavar="SECONDS", help=t("cli.timeout", default=int(defaults.timeout)))
+    parser.add_argument("--input-value", metavar="TEXT", help=t("cli.input_value", default=defaults.input_value))
+    parser.add_argument("--max-steps", type=int, metavar="N", help=t("cli.max_steps", default=defaults.max_steps))
+    parser.add_argument("--fail-on", choices=[*SEVERITIES, "never"], help=t("cli.fail_on", default=ERROR))
+    parser.add_argument("--fail-on-possible", action="store_true", default=None, help=t("cli.fail_on_possible"))
+    parser.add_argument("--show-window", action="store_true", default=None, help=t("cli.show_window"))
     parser.add_argument("--lang", choices=i18n.LANGUAGES, help=t("cli.lang"))
     parser.add_argument("--version", action="version", version="renpytester " + __version__)
     return parser
+
+
+def build_info_parser():
+    parser = argparse.ArgumentParser(prog="renpytester " + INFO, description=t("cli.info.description"))
+    parser.add_argument("game", metavar="GAME", help=t("cli.game"))
+    parser.add_argument("--sdk", metavar="PATH", help=t("cli.sdk"))
+    parser.add_argument("--config", metavar="FILE", help=t("cli.config", name=config.FILE_NAME))
+    parser.add_argument("--lang", choices=i18n.LANGUAGES, help=t("cli.lang"))
+    return parser
+
+
+def listed(text):
+    """A list given on the command line as words separated by commas, or None when it was not given."""
+    return None if text is None else tuple(item.strip() for item in text.split(",") if item.strip())
+
+
+def given_by(args):
+    """The settings the command line asked for, by their names in runner.Options. Others are None."""
+    return {
+        "sdk": args.sdk, "output": args.output, "baseline": args.baseline, "stages": listed(args.stages),
+        "strategy": args.strategy, "languages": listed(args.languages),
+        "labels": False if args.no_labels else None, "jobs": args.jobs, "seed": args.seed, "timeout": args.timeout,
+        "input_value": args.input_value, "max_steps": args.max_steps, "max_paths": args.max_paths,
+        "max_time": args.max_time, "max_depth": args.max_depth, "show_window": args.show_window,
+        "fail_on": args.fail_on, "fail_on_possible": args.fail_on_possible}
+
+
+def prepare(args, given, language_given):
+    """Reads the config file that goes with the game and returns the settings of the run (CFG-002)."""
+    basedir = discovery.resolve_basedir(args.game)
+    settings = config.load(config.find(basedir, args.config))
+    if settings.lang and not language_given:
+        i18n.set_language(settings.lang)  # I18N-002: the command line, then the config file, then the system.
+    return runner.build_options(args.game, given, settings)
+
+
+def fail(console, error):
+    console.write(console.paint(t(error.message_id, **error.params), ERROR))
+    return error.exit_code
+
+
+def internal_error(console):
+    # Anything unexpected is our fault, never the game's (NFR-004).
+    console.write(console.paint(t("error.internal"), ERROR))
+    console.write(traceback.format_exc())
+    return EXIT_TOOL
+
+
+def info(argv, language_given):
+    """Says what the game is, without playing it (CLI-008)."""
+    args = build_info_parser().parse_args(argv)
+    console = Console()
+    try:
+        options = prepare(args, {"sdk": args.sdk, "stages": None}, language_given)
+        options.stages = ()
+        with tempfile.TemporaryDirectory(prefix="renpytester-info-") as output:
+            options.output = output
+            result = runner.run(options, console.progress)
+    except ToolError as error:
+        return fail(console, error)
+    except KeyboardInterrupt:
+        console.write(t("cli.interrupted"))
+        return EXIT_TOOL
+    except Exception:
+        return internal_error(console)
+
+    if result.game.get("python"):
+        console.write(t("console.python", version=result.game["python"]))
+    if result.findings:
+        # The game cannot start: say why, since that is all there is to know about it.
+        console.write()
+        console.listing(result.findings)
+        return EXIT_FINDINGS
+    return EXIT_OK
 
 
 def main(argv=None):
@@ -86,54 +154,36 @@ def main(argv=None):
         wanted = None  # argparse reports the bad value below.
     i18n.set_language(wanted)
 
+    if argv and argv[0] == INFO:
+        return info(argv[1:], wanted is not None)
+
     args = build_parser().parse_args(argv)
     console = Console()
 
-    stages = tuple(i.strip() for i in args.stages.split(",") if i.strip())
-    unknown = [i for i in stages if i not in runner.STAGES]
-    if unknown or not stages:
-        error = UsageError("error.unknown_stage", stages=", ".join(unknown) or "-", all=", ".join(runner.STAGES))
-        console.write(console.paint(t(error.message_id, **error.params), ERROR))
-        return error.exit_code
-
-    languages = None
-    if args.languages is not None:
-        languages = tuple(i.strip() for i in args.languages.split(",") if i.strip())
-
-    if args.jobs is not None and args.jobs < 1:
-        error = UsageError("error.bad_jobs")
-        console.write(console.paint(t(error.message_id, **error.params), ERROR))
-        return error.exit_code
-
-    options = runner.Options(
-        game=args.game, sdk=args.sdk, output=args.output, strategy=args.strategy, labels=not args.no_labels,
-        jobs=args.jobs, seed=args.seed,
-        timeout=args.timeout, input_value=args.input_value, max_steps=args.max_steps, max_paths=args.max_paths,
-        max_time=args.max_time, max_depth=args.max_depth, show_window=args.show_window,
-        fail_on=args.fail_on, fail_on_possible=args.fail_on_possible,
-        stages=tuple(i for i in runner.STAGES if i in stages), languages=languages)
+    try:
+        options = prepare(args, given_by(args), wanted is not None)
+    except ToolError as error:
+        return fail(console, error)
 
     if options.show_window:
         console.write(console.paint(t("cli.show_window_warning"), "warning"))
 
     try:
-        report = runner.run(options, console.progress)
+        result = runner.run(options, console.progress)
     except ToolError as error:
-        console.write(console.paint(t(error.message_id, **error.params), ERROR))
-        return error.exit_code
+        return fail(console, error)
     except KeyboardInterrupt:
         console.write(t("cli.interrupted"))
         return EXIT_TOOL
     except Exception:
-        # Anything unexpected is our fault, never the game's (NFR-004).
-        console.write(console.paint(t("error.internal"), ERROR))
-        console.write(traceback.format_exc())
-        return EXIT_TOOL
+        return internal_error(console)
 
-    failed = report.failed(options.fail_on, options.fail_on_possible)
-    json_path = json_report.write(report, options.output)
-    console.summary(report, json_path, failed)
+    if result.interrupted:
+        console.write(t("cli.interrupted"))
+    failed = result.failed(options.fail_on, options.fail_on_possible)
+    paths = report.write_all(result, options.output)
+    console.summary(result, paths, failed)
 
-    if not report.complete:
+    if not result.complete:
         return EXIT_TOOL
     return EXIT_FINDINGS if failed else EXIT_OK

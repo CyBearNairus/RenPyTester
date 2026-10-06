@@ -1,13 +1,15 @@
 """One test run from start to finish: find the game, prepare it, run the stages, restore it."""
 
 import datetime
+import json
+import os
 import re
 import shutil
 import tempfile
 import threading
 import time
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from renpytester import __version__, discovery, lint
@@ -55,6 +57,47 @@ class Options:
     stages: tuple = STAGES
     # The game's languages to check; None is all of them (TL-001).
     languages: tuple | None = None
+    # An earlier report: findings that are in it are left out of this one (REP-007).
+    baseline: str | None = None
+    # From the config file (spec 4.11). `config` is the file itself, for the record.
+    config: str | None = None
+    severity: dict = field(default_factory=dict)
+    ignore: tuple = ()
+    inputs: dict = field(default_factory=dict)
+    variables: dict = field(default_factory=dict)
+    exclude_labels: tuple = ()
+
+
+def build_options(game, given, config):
+    """The settings of a run: the defaults, changed by the config file, changed by what was asked for
+    on the command line or in the window (CFG-001, CFG-002). `given` holds only what was asked for."""
+    values = dict(config.settings)
+    values.update({name: value for name, value in given.items() if value is not None})
+    if not values.get("sdk"):
+        values["sdk"] = os.environ.get("RENPY_SDK") or None  # GAME-004
+
+    if "stages" in values:
+        wanted = tuple(values["stages"])
+        unknown = [name for name in wanted if name not in STAGES]
+        if unknown or not wanted:
+            raise UsageError("error.unknown_stage", stages=", ".join(unknown) or "-", all=", ".join(STAGES))
+        values["stages"] = tuple(name for name in STAGES if name in wanted)
+    if values.get("jobs") is not None and values["jobs"] < 1:
+        raise UsageError("error.bad_jobs")
+
+    return Options(
+        game=game, config=str(config.path) if config.path else None, severity=dict(config.severity),
+        ignore=tuple(config.ignore), inputs=dict(config.inputs), variables=dict(config.variables),
+        exclude_labels=tuple(config.exclude_labels), **values)
+
+
+def load_baseline(path):
+    """The ids of the findings in an earlier report (REP-007)."""
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        return {finding["id"] for finding in data["findings"]}
+    except (OSError, ValueError, KeyError, TypeError):
+        raise UsageError("error.baseline_unreadable", path=str(path)) from None
 
 
 def now():
@@ -138,6 +181,8 @@ def run(options, on_progress=None):
     game = discovery.discover(options.game, options.sdk)
     if options.jobs is None:
         options.jobs = default_jobs()
+    # Read before anything is started: a baseline that cannot be read should not cost a whole run.
+    known = load_baseline(options.baseline) if options.baseline else None
 
     output_dir = Path(options.output).resolve()
     if output_dir == game.basedir or game.basedir in output_dir.parents:
@@ -152,6 +197,9 @@ def run(options, on_progress=None):
         "max_time": options.max_time, "max_depth": options.max_depth, "show_window": options.show_window,
         "fail_on": options.fail_on, "fail_on_possible": options.fail_on_possible, "stages": list(options.stages),
         "languages": list(options.languages) if options.languages is not None else None,
+        "baseline": options.baseline, "config": options.config, "severity": dict(options.severity),
+        "ignore": [rule.to_dict() for rule in options.ignore], "inputs": dict(options.inputs),
+        "variables": dict(options.variables), "exclude_labels": list(options.exclude_labels),
     }
     report = Report(__version__, str(game.basedir), game.kind, settings=settings, started=now())
     report.game = {"renpy_version": ".".join(str(i) for i in game.renpy_version) or None}
@@ -171,9 +219,12 @@ def run(options, on_progress=None):
         "strategy": options.strategy, "labels": options.labels, "seed": options.seed,
         "input_value": options.input_value,
         "max_steps": options.max_steps, "max_paths": options.max_paths, "max_time": options.max_time,
-        "max_depth": options.max_depth}
+        "max_depth": options.max_depth, "inputs": options.inputs, "variables": options.variables,
+        "exclude_labels": list(options.exclude_labels)}
 
     workspace = Workspace(game.basedir)
+    # What the routes stage has found so far; kept here so that a run that is stopped can still report it.
+    partial = {}
     try:
         with workspace, tempfile.TemporaryDirectory(prefix="renpytester-") as work_dir:
             if workspace.repaired:
@@ -207,16 +258,15 @@ def run(options, on_progress=None):
                     # The translations of each line are tried out as the story is played (TL-004).
                     harness_settings["languages"] = languages
                 jobs = []
-                found = []
                 translated = []
                 if LINT in options.stages:
                     progress("stage", name=LINT)
                     jobs.append((run_lint, (game, options, work_dir, output_dir, report, progress)))
                 if ROUTES in options.stages:
                     progress("stage", name=ROUTES)
-                    jobs.append((lambda *arguments: found.append(explore_routes(*arguments)), (
+                    jobs.append((explore_routes, (
                         game, options, harness_settings, hello.get("labels"), work_dir, output_dir, report,
-                        progress, cancel)))
+                        progress, cancel, partial)))
                 if translating:
                     progress("stage", name=TRANSLATIONS)
                     jobs.append((lambda *arguments: translated.append(check_translations(*arguments)), (
@@ -228,12 +278,22 @@ def run(options, on_progress=None):
                 else:
                     for function, arguments in jobs:
                         function(*arguments)
-                if found:
-                    finish_routes(game, options, found[0], output_dir, report)
+                if partial:
+                    finish_routes(game, options, partial.pop("exploration"), output_dir, report)
                 # Last, and from here, so that the order of the findings never depends on which
                 # process finished first (NFR-001).
                 if translated:
                     finish_translations(translated[0], report)
+    except KeyboardInterrupt:
+        # Stopped by the user. The game processes are gone and the game folder is as it was; what
+        # was found up to now is still reported, marked as not complete (CLI-006).
+        report.interrupted = True
+        unfinished = [name for name in options.stages if report.stages[name]["status"] in ("not_run", "running")]
+        if partial:
+            finish_routes(game, options, partial.pop("exploration"), output_dir, report)
+        for name in unfinished:
+            report.stages[name]["status"] = "interrupted"
+        report.notes.append({"message_id": "note.interrupted", "params": {}})
     finally:
         report.finished = now()
 
@@ -248,6 +308,11 @@ def run(options, on_progress=None):
     (output_dir / "engine-logs").rename(logs)
 
     report.merge_stages()
+    # What the user asked for, last: severities of their own, findings to ignore, findings already known.
+    report.set_severities(options.severity)
+    report.ignore(options.ignore)
+    if known is not None:
+        report.leave_out_known(known)
     report.complete = all(report.stages[name]["status"] in ("done", "blocked") for name in options.stages)
     return report
 
@@ -382,6 +447,9 @@ class Exploration:
         self.limits = []
         self.relaunches = 0
         self.started = time.monotonic()
+        self.jobs = 1
+        # Labels the config file said not to play, as the game named them (CFG-006).
+        self.excluded = []
 
     def collect(self, finding, lane, launch):
         """Keeps a finding with its place in an order that does not depend on timing (NFR-001):
@@ -411,7 +479,9 @@ def run_lane(lane, game, options, settings, exploration, work_dir, log_dir, prog
             with exploration.lock:
                 frontier.feed(event)
                 kind = event["ev"]
-                if kind == "finding":
+                if kind == "start":
+                    exploration.excluded = list(event.get("excluded") or [])
+                elif kind == "finding":
                     finding = to_finding(event, ROUTES)
                     exploration.collect(finding, lane, launch)
                     progress("finding", finding=finding)
@@ -483,13 +553,14 @@ def run_lane(lane, game, options, settings, exploration, work_dir, log_dir, prog
             label_list=list(labels or []))
 
 
-def explore_routes(game, options, harness_settings, labels, work_dir, output_dir, report, progress, cancel):
-    """Plays the game, exploring its branches (spec 4.3, 4.4). Returns what was found, not yet reported."""
+def explore_routes(game, options, harness_settings, labels, work_dir, output_dir, report, progress, cancel, partial):
+    """Plays the game, exploring its branches (spec 4.3, 4.4). What is found is left in `partial`,
+    not yet reported."""
     report.stages[ROUTES]["status"] = "running"
     label_runs = options.labels and options.strategy == "explore"
     labels = list(labels or []) if label_runs else []
     shares = split_labels(labels, options.jobs)
-    exploration = Exploration(labels)
+    exploration = partial["exploration"] = Exploration(labels)
     logs = Path(output_dir) / "engine-logs"
     work_dir = Path(work_dir)
 
@@ -506,7 +577,6 @@ def explore_routes(game, options, harness_settings, labels, work_dir, output_dir
         run_lane(number, game, options, settings, exploration, lane_work, lane_logs, progress, cancel)
 
     in_parallel(lanes, lane, cancel)
-    return exploration
 
 
 def in_parallel(jobs, function, cancel):
@@ -550,6 +620,8 @@ def finish_routes(game, options, exploration, output_dir, report):
     stage["end_reasons"] = dict(sorted(exploration.reasons.items()))
     stage["launches"] = totals["launches"]
     stage["jobs"] = exploration.jobs
+    if exploration.excluded:
+        stage["excluded_labels"] = exploration.excluded
     if options.labels and options.strategy == "explore":
         stage["label_runs"] = totals["label_runs"]
     # Now that everything has been played: what real play ran without trouble is not a problem (EXP-012).

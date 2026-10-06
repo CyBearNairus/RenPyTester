@@ -116,7 +116,8 @@ class Console:
             self.write("  " + t("console.untranslated_more", count=count, language=language))
         self.write()
 
-    def summary(self, report, json_path, failed):
+    def summary(self, report, paths, failed):
+        """Prints what the run found. `paths` has the file each report format was written to."""
         self.write()
         for severity in SEVERITIES:
             findings = [f for f in report.findings if f.severity == severity and not f.possible]
@@ -131,8 +132,13 @@ class Console:
             self.listing(possible)
 
         for note in report.notes:
-            if note["message_id"] != "note.repaired":
+            if note["message_id"] not in ("note.repaired", "note.interrupted"):
                 self.write(t(note["message_id"], **note["params"]))
+        # Left out on purpose, but never without saying how many (CFG-003, REP-007).
+        if report.ignored:
+            self.write(t("console.ignored", count=report.ignored))
+        if report.known:
+            self.write(t("console.known", count=report.known))
 
         if report.coverage and report.coverage.get("total"):
             executed, total = report.coverage["executed"], report.coverage["total"]
@@ -176,4 +182,5 @@ class Console:
             self.write(self.paint(t("console.failed") + "  " + counts, ERROR))
         else:
             self.write(self.paint(t("console.passed") + "  " + counts, "ok"))
-        self.write(t("console.report", path=str(json_path)))
+        self.write(t("console.report", path=str(paths["html"])))
+        self.write(t("console.report_data", json=str(paths["json"]), junit=str(paths["junit"])))

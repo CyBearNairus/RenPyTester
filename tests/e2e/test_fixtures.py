@@ -466,7 +466,7 @@ def test_minigame_is_skipped_and_each_outcome_the_script_checks_is_tried(run):
     assert (crash["line"], crash["possible"]) == (18, True)
     assert [(step["kind"], step["choice"]) for step in crash["path"]] == [("skip", "result = 'failed'")]
 
-    assert report["summary"] == {"error": 0, "warning": 0, "info": 1, "possible": 1}
+    assert report["summary"] == {"error": 0, "warning": 0, "info": 1, "possible": 1, "ignored": 0, "known": None}
     assert report["stages"]["routes"]["paths"] == 3
     coverage = report["coverage"]
     assert coverage["executed"] + coverage["low_confidence"] == coverage["total"]
@@ -846,3 +846,227 @@ def test_tutorial_translations_are_summarised_for_each_language(sdk, tmp_path, c
     untranslated = [f for f in report["findings"] if f["class"] == "untranslated"]
     assert untranslated and all(f["language"] in languages and f["severity"] == "warning" for f in untranslated)
     assert folder_digest(game) == before
+
+
+# ------------------------------------------------ settings file, reports, command line (M5)
+
+
+@pytest.fixture
+def settings_file(tmp_path):
+    """Returns a function that writes a settings file outside the game and returns its path."""
+
+    def write(text):
+        path = tmp_path / "settings.toml"
+        path.write_text(text, encoding="utf-8")
+        return str(path)
+
+    return write
+
+
+def events_of(tmp_path):
+    log = next((tmp_path / "report").glob("report-*-logs/events-run.jsonl"))
+    return [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+
+
+@pytest.mark.req("CFG-002", "CFG-005", "CFG-006")
+def test_settings_file_in_the_game_folder_is_used(run, tmp_path):
+    code, report, _text, game = run("configured", "--stages", "routes")
+    assert code == 0
+    assert report["findings"] == []
+    settings = report["settings"]
+    assert settings["config"] == str(game / "renpytester.toml")
+    assert (settings["seed"], settings["variables"], settings["inputs"]) == (
+        5, {"tickets": 2}, {"What is the door code?": "4721"})
+
+    # The variable was set before the first statement, a menu, so the choice that needs it was offered.
+    decisions = [e for e in events_of(tmp_path) if e["ev"] == "decision"]
+    assert decisions[0]["options"] == ["Go in", "Stay out"]
+    # The prompt named in the file got its own answer; the other one got the usual one.
+    typed = {(e["line"], e["choice"]) for e in decisions if e["kind"] == "input"}
+    assert typed == {(22, "4721"), (23, "Tester")}
+
+    # Excluded labels are not played, not started at, and not counted. A call to one returns at
+    # once, and a jump to one ends the story.
+    routes = report["stages"]["routes"]
+    assert routes["excluded_labels"] == ["arcade", "credits_roll"]
+    assert routes["label_runs"] == 2
+    assert routes["end_reasons"] == {"end": 3, "label end": 1}
+    coverage = report["coverage"]
+    assert sorted(coverage["labels"]) == ["hall", "start", "vault"]
+    assert coverage["labels"]["vault"]["executed"] == coverage["labels"]["vault"]["total"]
+    # All but what follows the wrong door code.
+    assert coverage["total"] - coverage["executed"] == 2
+
+
+@pytest.mark.req("CFG-001", "CFG-002")
+def test_settings_file_named_on_the_command_line_replaces_the_one_in_the_game_folder(run, settings_file):
+    code, report, _text, _game = run("configured", "--stages", "routes", "--config", settings_file(""))
+    assert code == 0
+    # Without its settings the game cannot be entered, and the labels left out before now fail.
+    assert report["settings"]["seed"] == 0
+    assert "excluded_labels" not in report["stages"]["routes"]
+    assert sorted((f["line"], f["possible"]) for f in report["findings"]) == [(41, True), (46, True)]
+    assert report["coverage"]["labels"]["hall"]["executed"] == 0
+
+
+@pytest.mark.req("CFG-002")
+def test_command_line_wins_over_the_settings_file(run):
+    _code, report, _text, _game = run("configured", "--stages", "routes", "--seed", "9")
+    assert report["settings"]["seed"] == 9
+    assert report["settings"]["variables"] == {"tickets": 2}
+
+
+@pytest.mark.req("CFG-003")
+def test_ignored_findings_are_left_out_and_counted(run, settings_file):
+    rule = '[[ignore]]\nclass = "exception"\nmessage = "undefined_alpha"\n'
+    code, report, text, _game = run("two_bugs", "--stages", "routes", "--config", settings_file(rule))
+    assert code == 1
+    assert [f["params"]["message"] for f in report["findings"]] == ["name 'undefined_beta' is not defined"]
+    assert report["summary"]["ignored"] == 1
+    assert report["ignored_by"] == [{"rule": {"class": "exception", "message": "undefined_alpha"}, "count": 1}]
+    assert "1 problems were left out by the ignore rules" in text
+
+    code, report, text, _game = run(
+        "two_bugs", "--stages", "routes", "--config", settings_file('[[ignore]]\nfile = "game/*.rpy"\n'))
+    assert code == 0
+    assert (report["findings"], report["summary"]["ignored"]) == ([], 2)
+    assert "PASSED" in text and "2 problems were left out" in text
+
+
+@pytest.mark.req("TL-005", "CFG-007")
+def test_untranslated_lines_can_be_made_errors_in_the_settings_file(run, settings_file):
+    code, report, _text, _game = run(
+        "tl_untranslated", "--stages", "translations", "--config",
+        settings_file('[severity]\nuntranslated = "error"\n'))
+    assert code == 1
+    assert [f["severity"] for f in report["findings"]] == ["error", "error"]
+    assert report["summary"]["error"] == 2
+
+
+@pytest.mark.req("CFG-004", "CLI-003")
+def test_unknown_setting_stops_the_run_before_anything_is_started(sdk, game_copy, tmp_path, capsys, settings_file):
+    game = game_copy("clean")
+    before = folder_digest(game)
+    code = cli.main([
+        str(game), "--sdk", str(sdk), "--output", str(tmp_path / "report"), "--lang", "en", "--config",
+        settings_file("max_path = 10\n")])
+    text = capsys.readouterr().out
+    assert code == 2
+    assert "has a setting this version does not know: max_path" in text
+    assert "max_paths" in text
+    assert not (tmp_path / "report").exists()
+    assert folder_digest(game) == before
+
+
+@pytest.mark.req("REP-007")
+def test_baseline_leaves_only_new_findings(run, tmp_path):
+    code, _first, _text, _game = run("two_bugs", "--stages", "routes")
+    assert code == 1
+    baseline = next((tmp_path / "report").glob("report-*.json"))
+    earlier = tmp_path / "baseline.json"
+    earlier.write_bytes(baseline.read_bytes())
+
+    code, report, text, _game = run("two_bugs", "--stages", "routes", "--baseline", str(earlier))
+    assert code == 0
+    assert (report["findings"], report["summary"]["known"]) == ([], 2)
+    assert "2 problems that the baseline report already had were left out" in text
+
+    # A game with other problems than the baseline's still fails.
+    code, report, _text, _game = run("exception", "--stages", "routes", "--baseline", str(earlier))
+    assert code == 1
+    assert (len(report["findings"]), report["summary"]["known"]) == (1, 0)
+
+
+@pytest.mark.req("REP-002", "REP-003", "REP-004", "REP-005", "REP-009")
+def test_every_run_writes_json_junit_and_html_reports(run, tmp_path):
+    import xml.etree.ElementTree as ElementTree
+
+    code, report, text, _game = run("exception", "--stages", "routes")
+    assert code == 1
+    stem = report["name"]
+    written = sorted(p.name for p in (tmp_path / "report").iterdir() if p.is_file())
+    assert written == [stem + ".html", stem + ".json", stem + ".xml"]
+    for name in written:
+        assert name in text
+
+    suites = ElementTree.parse(tmp_path / "report" / (stem + ".xml")).getroot()
+    assert (suites.get("tests"), suites.get("failures"), suites.get("errors")) == ("2", "1", "0")
+    failure = suites.find("testsuite/testcase/failure")
+    assert failure.get("type") == "exception"
+    assert "undefined_function" in failure.get("message")
+    assert "game/script.rpy:13" in failure.text
+
+    page = (tmp_path / "report" / (stem + ".html")).read_text(encoding="utf-8")
+    assert "Exception Fixture" in page and "FAILED" in page
+    assert "undefined_function" in page and "line 13" in page
+    assert 'data-severity="error" data-stage="routes"' in page
+
+
+@pytest.mark.req("CLI-006", "SAFE-002", "NFR-002")
+def test_stopping_a_run_restores_the_game_and_still_writes_what_was_found(run, monkeypatch):
+    from renpytester.report.console import Console
+
+    original = Console.progress
+
+    def stop_at_the_first_path(self, kind, **data):
+        original(self, kind, **data)
+        if kind == "step":
+            raise KeyboardInterrupt  # What Ctrl+C does, at a moment the test can choose.
+
+    monkeypatch.setattr(Console, "progress", stop_at_the_first_path)
+    code, report, text, _game = run("two_bugs", "--stages", "routes")
+
+    assert code == 3
+    assert (report["complete"], report["interrupted"]) == (False, True)
+    assert report["stages"]["routes"]["status"] == "interrupted"
+    assert report["stages"]["routes"]["paths"] == 1
+    assert [f["class"] for f in report["findings"]] == ["exception"]
+    assert [note["message_id"] for note in report["notes"]] == ["note.interrupted"]
+    assert "Stopped. The game folder has been restored." in text
+    assert "INCOMPLETE" in text
+
+
+@pytest.mark.req("CLI-008", "GAME-006")
+def test_info_says_what_the_game_is_without_playing_it(sdk, game_copy, tmp_path, capsys, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    game = game_copy("tl_untranslated")
+    before = folder_digest(game)
+    code = cli.main(["info", str(game), "--sdk", str(sdk), "--lang", "en"])
+    text = capsys.readouterr().out
+    assert code == 0
+    for part in ("Game: Untranslated Fixture", "Engine: Ren'Py 8.", "Languages: 2 (portuguese, spanish)",
+                 "Python: 3."):
+        assert part in text, part
+    assert "Playing" not in text and "PASSED" not in text
+    assert folder_digest(game) == before
+    # Nothing is left behind where the command was run.
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["game-1"]
+
+
+@pytest.mark.req("CLI-008", "ERR-001")
+def test_info_on_a_game_that_cannot_start_says_why(sdk, game_copy, capsys):
+    code = cli.main(["info", str(game_copy("parse_error")), "--sdk", str(sdk), "--lang", "en"])
+    text = capsys.readouterr().out
+    assert code == 1
+    assert "game/script.rpy:8" in text
+
+
+@pytest.mark.req("GAME-004")
+def test_sdk_is_taken_from_the_environment_when_not_given(sdk, game_copy, tmp_path, capsys, monkeypatch):
+    monkeypatch.setenv("RENPY_SDK", str(sdk))
+    code = cli.main([
+        str(game_copy("clean")), "--output", str(tmp_path / "report"), "--lang", "en", "--stages", "routes"])
+    assert code == 0
+    assert "PASSED" in capsys.readouterr().out
+
+
+@pytest.mark.req("I18N-002")
+def test_interface_language_can_be_set_in_the_settings_file(sdk, game_copy, tmp_path, capsys, settings_file):
+    arguments = [
+        str(game_copy("exception")), "--sdk", str(sdk), "--output", str(tmp_path / "report"), "--stages", "routes",
+        "--config", settings_file('lang = "pt-BR"\n')]
+    assert cli.main(arguments) == 1
+    assert "O jogo quebrou aqui" in capsys.readouterr().out
+    # The command line still has the last word.
+    assert cli.main([*arguments, "--lang", "en"]) == 1
+    assert "The game crashed here" in capsys.readouterr().out

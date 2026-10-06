@@ -14,7 +14,7 @@ You are also told about translations with a broken text tag, translations that s
 As the story is played, every translation of each line is tried out in the state the game is really in, so a translation that uses a variable the game does not have is found without playing the game again in each language.
 
 This is an early version.
-HTML reports and a graphical interface are planned; see [docs/SPEC.md](docs/SPEC.md).
+A graphical interface and a single-file executable are planned; see [docs/SPEC.md](docs/SPEC.md).
 
 ## Usage
 
@@ -33,11 +33,63 @@ For a project that lives in the Ren'Py launcher's projects folder, add the SDK:
 python -m renpytester PATH_TO_GAME --sdk PATH_TO_RENPY_SDK
 ```
 
-The result is printed and also saved in the `renpytester-report` folder, in a file named after the game and the time of the run, such as `report-the-question-2026-10-06-143005.json`.
+The result is printed and also saved in the `renpytester-report` folder, in files named after the game and the time of the run, such as `report-the-question-2026-10-06-143005.html`.
 Earlier reports are never overwritten.
-The exit code is 0 when no errors were found, 1 when errors were found, and 3 when the game could not be tested.
+Three files are written each time:
+
+- `.html`: the report to read. Open it in any browser; it needs no internet connection.
+- `.json`: everything the run found, for other programs. Its format is described in [docs/report-schema.md](docs/report-schema.md).
+- `.xml`: a JUnit report, which CI systems show as test results.
+
+The exit code is 0 when no errors were found, 1 when errors were found, 2 when an option or the settings file is wrong, and 3 when the game could not be tested or the run did not finish.
+If you stop a run with Ctrl+C, the game folder is restored and a report of what was found until then is still written.
 
 To check only some of the game's languages, name them: `--languages french,spanish`.
+To see only problems that an earlier run did not have, give that run's JSON report: `--baseline OLD_REPORT.json`.
+To see what a game is without playing it, run `python -m renpytester info PATH_TO_GAME`.
 
 Messages are in English or Brazilian Portuguese, following your system; use `--lang en` or `--lang pt-BR` to choose.
 Run `python -m renpytester --help` for all options.
+
+## Settings file
+
+Settings can be kept in a file named `renpytester.toml` in the game's folder, beside the `game` folder, so that every run uses them.
+The file is optional, and so is everything in it.
+An option given on the command line wins over the file, and `--config FILE` uses another file in its place.
+A setting the tool does not know is reported as a mistake, never skipped.
+
+```toml
+# Any option, by its name with underscores.
+stages = ["lint", "routes"]
+max_time = 300
+fail_on = "warning"
+lang = "pt-BR"
+
+# Labels that are not to be played, such as a minigame.
+# A call to one returns at once, and a jump to one ends the story there.
+exclude_labels = ["pong_game", "debug_*"]
+
+# How serious a kind of problem is to you.
+[severity]
+untranslated = "error"
+
+# What to type at a particular prompt. Other prompts get --input-value.
+[inputs]
+"What is the door code?" = "4721"
+
+# Values that variables of the game have when the story starts.
+[variables]
+tickets = 2
+
+# Problems you do not want listed. They are still counted.
+# A problem is left out when it matches every part of a rule.
+[[ignore]]
+class = "untranslated"
+language = "french"
+
+[[ignore]]
+file = "game/old/*.rpy"
+message = "is not defined"
+```
+
+The parts of an ignore rule are `class` (the kind of problem, as the JSON report names it), `file` and `label` (patterns with `*`), `language`, and `message` (a regular expression looked for in the problem's message).

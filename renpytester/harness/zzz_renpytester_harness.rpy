@@ -23,6 +23,7 @@ init 999 python hide:
     def _renpytester_install():
         import ast as pyast
         import builtins
+        import fnmatch
         import io
         import json
         import os
@@ -60,6 +61,11 @@ init 999 python hide:
         story_done = bool(settings.get("story_done"))
         # The game's languages whose translations are to be checked (spec 4.7); none when that stage is off.
         languages = [str(name) for name in settings.get("languages") or []]
+        # From the config file (spec CFG-005, CFG-006): what to type at particular prompts, values that
+        # game variables are given as the story starts, and labels that are not to be played.
+        input_values = settings.get("inputs") or {}
+        initial_values = settings.get("variables") or {}
+        exclude_patterns = [str(pattern) for pattern in settings.get("exclude_labels") or []]
 
         events = open(os.environ["RENPYTESTER_EVENTS"], "a", encoding="utf-8")
 
@@ -109,6 +115,10 @@ init 999 python hide:
             "unreported_low": [],
             # While the translation check switches language: the failures seen in doing so (TL-002).
             "switching": None,
+            # True until a story statement has been played since the game started or was put back to a
+            # snapshot, and the name of the story's first statement (CFG-005).
+            "fresh": True,
+            "first": None,
         }
 
         # ------------------------------------------------------------------------------- helpers
@@ -183,6 +193,37 @@ init 999 python hide:
 
         def is_public_label(node):
             return type(node).__name__ == "Label" and isinstance(node.name, str) and not node.name.startswith("_")
+
+        def leave_out_excluded():
+            """Takes the labels the config file excludes, and the statements under them, out of the
+            story (CFG-006). Returns the names of those labels."""
+            if not exclude_patterns:
+                return []
+            files = {}
+            for node in story.values():
+                files.setdefault(node.filename, []).append(node)
+            names = []
+            for nodes in files.values():
+                nodes.sort(key=lambda n: (n.linenumber, str(n.name)))
+                inside = False
+                for node in nodes:
+                    if is_public_label(node):
+                        inside = bool([p for p in exclude_patterns if fnmatch.fnmatchcase(node.name, p)])
+                        if inside:
+                            names.append(node.name)
+                    if inside:
+                        del story[node.name]
+            return sorted(names)
+
+        excluded = leave_out_excluded()
+        excluded_set = set(excluded)
+        # Any plain return statement will do to leave an excluded label the way its own would.
+        plain_return = None
+        if excluded:
+            for candidate in renpy.game.script.all_stmts:
+                if type(candidate).__name__ == "Return" and not getattr(candidate, "expression", None):
+                    plain_return = candidate.name
+                    break
 
         def script_map():
             """Every story statement, by file and by the label it sits under, for the coverage report."""
@@ -267,8 +308,17 @@ init 999 python hide:
             renpy.loadsave.dump((roots, renpy.game.log), buffer)
             return zlib.compress(buffer.getvalue(), 1)
 
+        def set_initial_values():
+            for name, value in sorted(initial_values.items()):
+                target = store
+                parts = name.split(".")
+                for part in parts[:-1]:
+                    target = getattr(target, part)
+                setattr(target, parts[-1], value)
+
         def restore(data):
             """Puts the game back as it was when `data` was taken. Never returns."""
+            state["fresh"] = True
             state["interact_type"] = None
             state["path_steps"] = 0
             roots, log = renpy.loadsave.loads(zlib.decompress(data))
@@ -445,8 +495,25 @@ init 999 python hide:
             state["steps"] += 1
             state["path_steps"] += 1
 
+            if name in excluded_set and plain_return is not None and state["starts"] and not state["finished"]:
+                # A label the config file says not to play (CFG-006). It is left at once, as if it had
+                # returned: a call carries on after it, and a jump to it ends the story there.
+                store._args = None
+                store._kwargs = None
+                renpy.game.log.checkpoint(hard=True)
+                raise renpy.game.JumpException(plain_return)
+
             node = story.get(name)
             if node is not None:
+                if state["fresh"]:
+                    # The first statement played after the game started or was put back to a snapshot.
+                    # When that is the story's first statement, nothing has set the variables the
+                    # config file gives values to, or putting the game back has unset them (CFG-005).
+                    state["fresh"] = False
+                    if state["first"] is None:
+                        state["first"] = name
+                    if name == state["first"]:
+                        set_initial_values()
                 if state["need_root"]:
                     # The first statement of the story: the point every handed-over path and every
                     # label run starts from.
@@ -788,7 +855,7 @@ init 999 python hide:
         # ----------------------------------------------------------------------- input (RUN-005)
 
         def text_input(prompt, default="", allow=None, exclude="{}", length=None, **kwargs):
-            value = input_value
+            value = input_values.get(prompt, input_value) if isinstance(prompt, str) else input_value
             if allow:
                 value = "".join(i for i in value if i in allow)
             if exclude:
@@ -1321,7 +1388,8 @@ init 999 python hide:
                 state["labels"] = labels_to_start()
                 if label_list is not None:
                     state["labels"] = [name for name in label_list if name in set(state["labels"])]
-            emit("start", seed=seed, map=script_map(), labels=list(state["labels"]))
+            state["fresh"] = True
+            emit("start", seed=seed, map=script_map(), labels=list(state["labels"]), excluded=excluded)
 
             # Handed-over paths and label runs all begin at the first statement of the story; a snapshot
             # is taken there, so that each can start without restarting the engine.

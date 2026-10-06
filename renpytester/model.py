@@ -65,6 +65,13 @@ class Report:
     finished: str | None = None
     # File name, without extension, that this run's report and log folder are saved under (REP-009).
     name: str = "report"
+    # True when the user stopped the run before it finished (CLI-006).
+    interrupted: bool = False
+    # Findings left out because an ignore rule matched them, in all and for each rule (CFG-003).
+    ignored: int = 0
+    ignored_by: list = field(default_factory=list)
+    # Findings left out because the baseline report already had them; None when no baseline was given (REP-007).
+    known: int | None = None
     # The findings by their id, for add(). Rebuilt there whenever the list was changed by other means.
     _by_id: dict = field(default_factory=dict, repr=False, compare=False)
 
@@ -132,6 +139,33 @@ class Report:
             else:
                 self.findings.append(finding)
 
+    def set_severities(self, severities):
+        """Gives the findings of some classes the severity the config file asks for (TL-005, CFG-007)."""
+        for finding in self.findings:
+            if finding.cls in severities:
+                finding.severity = severities[finding.cls]
+
+    def ignore(self, rules):
+        """Takes out the findings that an ignore rule of the config file matches, and counts them:
+        they are left out of the list, never out of the sums (CFG-003)."""
+        counts = [0] * len(rules)
+        kept = []
+        for finding in self.findings:
+            matched = next((index for index, rule in enumerate(rules) if rule.matches(finding)), None)
+            if matched is None:
+                kept.append(finding)
+            else:
+                counts[matched] += 1
+        self.findings = kept
+        self.ignored = sum(counts)
+        self.ignored_by = [{"rule": rule.to_dict(), "count": count} for rule, count in zip(rules, counts)]
+
+    def leave_out_known(self, known):
+        """Takes out the findings an earlier report already had, by their ids, and counts them (REP-007)."""
+        kept = [finding for finding in self.findings if finding.id not in known]
+        self.known = len(self.findings) - len(kept)
+        self.findings = kept
+
     def count(self, severity):
         """Confirmed findings of one severity. Possible issues are counted apart (EXP-013)."""
         return sum(1 for f in self.findings if f.severity == severity and not f.possible)
@@ -156,12 +190,17 @@ class Report:
             "schema_version": SCHEMA_VERSION,
             "tool": {"name": "renpytester", "version": self.tool_version},
             "complete": self.complete,
+            "interrupted": self.interrupted,
+            "name": self.name,
             "started": self.started,
             "finished": self.finished,
             "game": {"path": self.game_path, "kind": self.game_kind, **self.game},
             "settings": self.settings,
             "stages": self.stages,
-            "summary": {**{name: self.count(name) for name in SEVERITIES}, "possible": self.count_possible()},
+            "summary": {
+                **{name: self.count(name) for name in SEVERITIES}, "possible": self.count_possible(),
+                "ignored": self.ignored, "known": self.known},
+            "ignored_by": self.ignored_by,
             "coverage": self.coverage,
             "statistics": self.statistics,
             "notes": self.notes,

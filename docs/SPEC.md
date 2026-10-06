@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Version 0.13 **approved** by the project owner on 2026-10-06. Version 0.14 amendments (from building M4) await approval. |
+| Status | Version 0.14 **approved** by the project owner on 2026-10-06. Version 0.15 amendments (from building M5) await approval. |
 | Last updated | 2026-10-06 |
 
 This document is the source of truth for what RenPyTester does.
@@ -279,11 +279,12 @@ Translation testing MUST NOT multiply run time by the number of languages: check
 | --- | --- | --- |
 | REP-001 | MUST | Console output: a single progress bar that updates in place (stage, percent, paths done, coverage, findings so far, estimated time left), then a summary grouped by severity, with file:line for each finding. Readable without colour; colour used when the terminal supports it. When output is not a terminal (CI logs), plain periodic progress lines replace the bar. |
 | REP-002 | MUST | JSON report containing everything: game info, run settings, seed, all findings, all paths that led to findings, coverage. The schema carries a version number and is documented in `docs/`. |
-| REP-003 | MUST | JUnit XML report, so CI systems show findings as failed tests. |
+| REP-003 | MUST | JUnit XML report, so CI systems show findings as failed tests. There is one test suite for each stage that was asked for and one test for each finding. A finding that makes the run fail (CLI-004, EXP-013) is a failed test; any other finding is a skipped test, which CI systems list with its message without failing the build. Each stage also has a test of its own, which is in error when the stage did not finish (NFR-002). Test and suite names are the same in every interface language (I18N-003). |
 | REP-004 | MUST | Self-contained single-file HTML report (no internet needed to view it), written for the game developer and concise: a one-screen summary first (pass/fail, counts by severity, coverage, per-language translation status), then confirmed findings grouped by script file, then possible issues (EXP-013) in a separate section, each finding collapsed to one line that expands to show the reproduction path and traceback. Filter by severity, stage and language. |
 | REP-005 | MUST | Reports are written to `--output DIR` (default `./renpytester-report/`), never inside the game directory. |
 | REP-006 | MUST | Messages are written for game developers, not engine developers: say what is wrong and where in *their* script, with the raw traceback available but secondary. |
-| REP-007 | SHOULD | `--baseline REPORT.json` reports only findings that are not in an earlier report, so a project with known issues can still gate on new ones. |
+| REP-007 | SHOULD | `--baseline REPORT.json` reports only findings that are not in an earlier report, so a project with known issues can still gate on new ones. Findings are matched by their stable id. Those left out are counted in the summary of every output. A baseline that is not a RenPyTester JSON report is a usage error (exit 2), found before the game is started. |
+| REP-010 | MUST | Every run writes the JSON, JUnit and HTML reports, under the same name (REP-009) with the extensions `.json`, `.xml` and `.html`. The JUnit and HTML reports are made from the data of the JSON report and nothing else, so the three always agree. |
 | REP-009 | MUST | Report files are named after the game and the time of the run, `report-<game name>-<yyyy-mm-dd>-<hhmmss>`, with the extension of their format, so that reports of different games, and of successive runs of one game, never overwrite each other. The game name is reduced to lowercase letters, digits and hyphens. Engine logs for the run go in a folder of the same name ending in `-logs`. The console prints the full path. |
 | REP-008 | MUST | The engine's own log, `traceback.txt` and `errors.txt` output from the run are preserved in the output directory. |
 
@@ -296,23 +297,24 @@ Translation testing MUST NOT multiply run time by the number of languages: check
 | CLI-003 | MUST | Exit codes: `0` no findings at or above the failure threshold; `1` findings at or above it; `2` bad usage or configuration; `3` the game could not be launched or the tool failed internally. |
 | CLI-004 | MUST | `--fail-on error\|warning\|info\|never` sets the threshold (default `error`). |
 | CLI-005 | MUST | `--help` documents every option with its default; `--version` prints the version. |
-| CLI-006 | MUST | Ctrl+C stops the game, cleans up (SAFE-002), and still writes a partial report marked incomplete. |
+| CLI-006 | MUST | Ctrl+C stops the game, cleans up (SAFE-002), and still writes a partial report marked incomplete. The report is written in every format, has what was found until then, and gives each stage that had not finished the status `interrupted`. The exit code is 3, as for any run that is not complete. |
 | CLI-007 | MUST | Launched with no arguments (for example by double-click), the executable opens the graphical interface (4.14). Dragging a game folder onto the executable opens the graphical interface with that game already selected. `renpytester gui [GAME]` does the same from a terminal. |
-| CLI-008 | SHOULD | `renpytester info GAME` prints what GAME-006 detects and exits, without running the game's story. |
+| CLI-008 | SHOULD | `renpytester info GAME` prints what GAME-006 detects and exits, without running the game's story. It writes no report. When the game cannot start, it says why and exits with code 1. |
 | CLI-009 | — | *Withdrawn in 0.2.* Replaced by section 4.14. |
 | CLI-010 | MUST | `--lang en\|pt-BR` selects the interface language (4.15). |
-| CLI-011 | MUST | Run settings that requirements call configurable are available as options: `--seed` (RUN-010), `--timeout` (RUN-008), `--max-steps` (RUN-009), `--input-value` (RUN-005), `--show-window` (GAME-007), `--output` (REP-005), `--languages` (TL-001). |
+| CLI-011 | MUST | Run settings that requirements call configurable are available as options: `--seed` (RUN-010), `--timeout` (RUN-008), `--max-steps` (RUN-009), `--input-value` (RUN-005), `--show-window` (GAME-007), `--output` (REP-005), `--languages` (TL-001), `--config` (CFG-002), `--baseline` (REP-007). |
 
 ### 4.11 Configuration (CFG)
 
 | ID | Pri | Requirement |
 | --- | --- | --- |
 | CFG-001 | MUST | Zero configuration is a supported mode: every setting has a default. |
-| CFG-002 | MUST | Optional `renpytester.toml`, looked for in the game directory, or given by `--config`. Command-line options override the file. |
-| CFG-003 | MUST | Ignore rules: suppress findings by class, file glob, label, language, or message pattern. Suppressed findings are counted in the summary, never silently dropped. |
-| CFG-004 | MUST | Unknown keys in the config file are an error (exit 2), not ignored. |
-| CFG-005 | SHOULD | Per-prompt input values, and initial values for chosen game variables, so games that gate content on input can be explored. |
-| CFG-006 | SHOULD | Mark labels as excluded from exploration (e.g. a minigame that cannot be automated). |
+| CFG-002 | MUST | Optional `renpytester.toml`, looked for in the game directory, or given by `--config`. Command-line options override the file. A file given by `--config` is used in place of the one in the game directory, not on top of it. Run settings have the names of their command-line options, with underscores (`max_paths = 100`); `--no-labels` is `labels = false`. A file or folder named in the file (`sdk`, `output`, `baseline`) is relative to the file. |
+| CFG-003 | MUST | Ignore rules: suppress findings by class, file glob, label, language, or message pattern. Suppressed findings are counted in the summary, never silently dropped. Each rule is an `[[ignore]]` table, and a finding is ignored when it matches every part the rule has. `file` and `label` are glob patterns. `message` is a regular expression looked for in the finding's message; it is tried on the message in each interface language, so that a rule keeps working whatever language the tool is run in. The JSON report says how many findings each rule left out. |
+| CFG-004 | MUST | Unknown keys in the config file are an error (exit 2), not ignored. So are a value of the wrong kind and a file that is not valid TOML. The message names the file and the key, and nothing is started. |
+| CFG-005 | SHOULD | Per-prompt input values, and initial values for chosen game variables, so games that gate content on input can be explored. The `[inputs]` table gives the exact text of a prompt the text to type there; other prompts get the usual value (RUN-005). The `[variables]` table gives variables their values at the first statement of the story, after the game's own defaults, for the story and for every label run. What is found in a state set this way is an ordinary finding, not a possible issue: the developer chose that state. |
+| CFG-006 | SHOULD | Mark labels as excluded from exploration (e.g. a minigame that cannot be automated). `exclude_labels` is a list of glob patterns. An excluded label is never played: no label run starts at it, and reaching it acts as an immediate `return`, so a call to it carries on after the call and a jump to it ends the story there. Its statements are left out of the coverage total, and the report lists the labels that were excluded. |
+| CFG-007 | MUST | The `[severity]` table gives a class of finding the severity the developer wants (for example `untranslated = "error"`, TL-005). It applies to every finding of that class, before ignore rules, the baseline and the failure threshold. |
 
 ### 4.12 Compatibility (COMPAT)
 
@@ -360,7 +362,7 @@ It is a front end to the same run the command line performs, not a second implem
 | ID | Pri | Requirement |
 | --- | --- | --- |
 | I18N-001 | MUST | The console output, the graphical interface, the HTML report and all finding messages are available in English (`en`) and Brazilian Portuguese (`pt-BR`). |
-| I18N-002 | MUST | The language is taken from the operating system's locale, falling back to English; `--lang` or the config file overrides it; the GUI has a language selector. |
+| I18N-002 | MUST | The language is taken from the operating system's locale, falling back to English; `--lang` or the config file (`lang`) overrides it, and `--lang` wins over the file; the GUI has a language selector. |
 | I18N-003 | MUST | Machine-readable output is language-neutral: JSON keys, finding class identifiers, severity names, exit codes and JUnit test names are the same whatever the interface language, so CI results and baselines (REP-007) do not depend on it. |
 | I18N-004 | MUST | Findings are stored as a message identifier plus parameters, and turned into text when displayed, so one JSON report can be rendered in either language. |
 | I18N-005 | MUST | Text that comes from the game or the engine (tracebacks, script lines, lint's own wording) is shown as is, never translated. |
@@ -460,7 +462,7 @@ The harness's Python version cannot be chosen with a virtual environment, becaus
 | M3d | Label runs (**done** 2026-10-06) | Starting at every label, and resolving those findings against normal exploration. | EXP-007, -011–015, -019, -020 |
 | M3e | Parallel processes (**done** 2026-10-06) | Several game processes exploring at once. | RUN-014–016, -025, -026 |
 | M4 | Translations (**done** 2026-10-06) | Language discovery and all TL MUSTs. The SHOULD and COULD rows of 4.7 are left for later, except orphan translations (TL-007), which lint already reports. | TL-001–006, -012 |
-| M5 | Reports and config | JUnit, HTML, config file, ignore rules, baseline. | REP-003–008, CFG, remaining CLI |
+| M5 | Reports and config (**done** 2026-10-06) | JUnit, HTML, config file, ignore rules, baseline, the partial report after Ctrl+C and the `info` command. The two SHOULD rows that add more to the config file, stated outcomes of interactions (RUN-022) and user-authored paths (EXP-009), are left for later. | REP-003, -004, -007, -010, CFG-001–007, CLI-005, -006, -008 |
 | M6 | Sandbox | Cached copy with incremental synchronisation, cache commands. | SAFE-006, -007, -009–012 |
 | M7 | Graphical interface | The window described in 4.14. | GUI, CLI-007 |
 | M8 | Packaging | Single-file executables, release CI. | DIST |
@@ -488,12 +490,13 @@ Open:
 
 | # | Question | Recommendation |
 | --- | --- | --- |
-| D18 | Approve the version 0.14 amendments: TL-012 added; TL-001 to TL-006 made precise. In particular: an untranslated line is one finding of severity *warning* each, of which the console lists ten per language; a difference in `[variables]` is a *warning*; the engine's built-in interface texts are not counted as untranslated; and a translation is not reported for a fault its original has too. | Approve. |
+| D19 | Approve the version 0.15 amendments: REP-010 and CFG-007 added; REP-003, REP-007, CFG-002 to CFG-006, CLI-006, CLI-008 and I18N-002 made precise. In particular: every run writes all three report formats; in JUnit a finding that does not fail the run is a skipped test; an excluded label acts as an immediate `return`; and an ignore rule's message pattern is tried on the message in each interface language. | Approve. |
 
 Settled on 2026-10-06:
 
 | # | Decision |
 | --- | --- |
+| D18 | Version 0.14 amendments approved: TL-012 added; TL-001 to TL-006 made precise. |
 | D17 | Version 0.13 amendments approved: RUN-025 and RUN-026 added; RUN-014, RUN-015, EXP-003 and NFR-001 made precise. Only label runs and lint are spread over several processes; the story is explored by one. |
 | D1 | Test in place by default. Sandbox copy is opt-in (flag and GUI checkbox), cached between runs and synchronised incrementally (SAFE-006, -009 to -012). |
 | D2 | A graphical interface is required for 1.0 (4.14). |
@@ -532,3 +535,4 @@ Settled on 2026-10-06:
 | 2026-10-06 | 0.12 | M3d built. D15 settled (0.11 approved). Added EXP-019 (what a label run plays) and EXP-020 (which labels are started at); EXP-007, EXP-011 and EXP-012 made precise. |
 | 2026-10-06 | 0.13 | M3e built. D16 settled (0.12 approved). Added RUN-025 (no safe mode) and RUN-026 (fixed hash seed); RUN-014, RUN-015, EXP-003 and NFR-001 made precise. |
 | 2026-10-06 | 0.14 | M4 built. D17 settled (0.13 approved). Added TL-012 (summary for each language); TL-001 to TL-006 made precise; `--languages` added to CLI-011. |
+| 2026-10-06 | 0.15 | M5 built. D18 settled (0.14 approved). Added REP-010 (all three formats, from the same data) and CFG-007 (severity of a class); REP-003, REP-007, CFG-002 to CFG-006, CLI-006, CLI-008 and I18N-002 made precise; `--config` and `--baseline` added to CLI-011. |

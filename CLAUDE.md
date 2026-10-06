@@ -6,8 +6,8 @@ Runnable from source with plain Python or as a single-file executable, from a te
 ## Current state
 
 **Milestones M0 (spikes), M1 (walking skeleton), M2 (lint stage), M3a (exploration), M3b (checks that need no rendering), M3c (getting past minigames), M3d (label runs), M3e (parallel processes) and M4 (translations) are done.**
-**M5 (reports and config) is next.**
-[docs/SPEC.md](docs/SPEC.md) version 0.13 is approved; the 0.14 amendments that came out of building M4 are waiting for the owner's approval (decision D18 in spec section 9.2).
+**M5 (reports and config) is done too. M6 (sandbox) is next.**
+[docs/SPEC.md](docs/SPEC.md) version 0.14 is approved; the 0.15 amendments that came out of building M5 are waiting for the owner's approval (decision D19 in spec section 9.2).
 What works today: `python -m renpytester GAME` finds the game and its engine and explores every choice of every menu with no window, using in-memory snapshots, and carries on after a crash or a hang.
 While playing it checks for undefined images, missing image, audio and movie files, broken text tags and menus with nothing to choose.
 It also runs the engine's lint and turns its report into findings, merged with what playing found.
@@ -19,7 +19,10 @@ With `--jobs` above 1 (the default on most computers) the label runs are shared 
 For each language the game has, it reports lines and texts with no translation, broken text tags in translations, translations whose `[variables]` differ from the original's, and a language that cannot be switched to.
 These are checked by a game process of its own that plays nothing.
 While the story is played, every translation of each line is also tried out in the state the game is in, for all languages at once, so no route is played again for a language.
-Not built yet: JUnit/HTML/config (M5), sandbox (M6), GUI (M7), packaging (M8).
+Every run writes three reports under the same name: JSON, JUnit XML and a self-contained HTML page.
+Settings can be kept in a `renpytester.toml` in the game folder: any option, ignore rules, severities, answers for particular prompts, starting values for game variables, and labels not to play.
+`--baseline` leaves out what an earlier report already had, Ctrl+C still writes a report of what was found, and `renpytester info GAME` says what a game is without playing it.
+Not built yet: sandbox (M6), GUI (M7), packaging (M8).
 Engine facts and hooks are recorded in [docs/SPIKES.md](docs/SPIKES.md): read it before touching the harness.
 `spikes/` holds the throwaway M0 experiments; never import from it.
 
@@ -99,6 +102,13 @@ The ones that cause real damage if forgotten:
   Saves and persistent data go to a temp directory.
   In sandbox mode, write nothing at all to the original.
 - **Never report "passed" for something that was not checked.** Skipped is skipped.
+- **Options have no defaults in the command-line parser.**
+  An option that was not given must stay `None`, so that the config file can supply it; the defaults live in `runner.Options` only, and `runner.build_options` puts the three together.
+  Give a new option a default in `argparse` and the config file silently stops working for it.
+- **Everything from the game is escaped in the HTML report**, and stripped of characters XML cannot hold in the JUnit report.
+  Dialogue, tracebacks and choices are text the game wrote; the report shows them, never runs them.
+- **State the harness sets at the story's first statement is set again after every return to it.**
+  Putting the game back to a snapshot can roll back to before that statement and undo it, which is why the config file's variables are applied whenever the first statement played after a start or a restore is the story's first.
 
 ## Test games
 
@@ -146,7 +156,9 @@ Paths to these come from environment variables.
 
 - `renpytester/`: the orchestrator.
   `cli` parses options, `discovery` finds the game and engine, `workspace` prepares and restores the game folder, and `launcher` runs the engine invisibly.
-  `lint` reads the engine's lint report, `routes` adds up coverage and tracks unexplored branches, `runner` ties a run together, `model` holds findings and the report, `i18n` and `locale/` hold every user-facing string, and `report/` writes output.
+  `lint` reads the engine's lint report, `routes` adds up coverage and tracks unexplored branches, `runner` ties a run together, and `model` holds findings and the report.
+  `config` reads `renpytester.toml`, `i18n` and `locale/` hold every user-facing string, and `report/` writes output.
+  The JUnit and HTML writers take the JSON report's data, never the `Report` object: what is not in the JSON cannot be in them.
 - `renpytester/harness/zzz_renpytester_harness.rpy`: the script injected into the game.
 - `tests/fixtures/games/`: one small game per behaviour under test. A new finding class needs a new fixture.
 - `docs/report-schema.md`: the JSON report format. Update it with any change to `model.py`.
