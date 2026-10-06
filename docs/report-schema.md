@@ -17,7 +17,7 @@ Adding a field does not change it, so readers should ignore fields they do not k
 | `complete` | boolean | `false` when the run was cut short. A report that is not complete proves nothing about what it does not list. |
 | `started`, `finished` | string | ISO 8601 timestamps in UTC. |
 | `game` | object | See below. |
-| `settings` | object | The settings the run used, including `seed`, so the run can be repeated. `jobs` is the number of game processes that were allowed to run at once. |
+| `settings` | object | The settings the run used, including `seed`, so the run can be repeated. `jobs` is the number of game processes that were allowed to run at once. `languages` is the list given with `--languages`, or `null` when every language was to be checked. |
 | `stages` | object | One entry per stage, keyed by stage name. See below. |
 | `summary` | object | Number of confirmed findings per severity (`error`, `warning`, `info`), and `possible`, the number of possible issues of any severity. |
 | `coverage` | object or null | See below. `null` when the game never started. |
@@ -72,6 +72,19 @@ The `routes` stage also has:
   The first process explores the story and keeps its logs in the log folder itself; each of the others plays label runs and keeps its logs in a subfolder named `labels-1`, `labels-2` and so on.
 - `limited`: present only when a limit stopped exploration early. It has `kind` (`max_paths`, `max_time` or `relaunches`), `unexplored`, the number of branches left, and `labels`, the number of labels not played by themselves.
 
+The `translations` stage also has:
+
+- `languages`: one entry for each language that was checked, keyed by the language's name, in alphabetical order.
+  Each has `switched` (`false` when the game could not be switched to that language), and `dialogue` and `strings`, each with `translated` and `total`.
+  `dialogue` counts lines of dialogue.
+  `strings` counts the game's other translatable texts: menu choices, and text marked for translation in screens and Python.
+  The object is empty for a game with no translations.
+- `findings`: how many findings in the report belong to this stage.
+- `played`: `false` when the routes stage did not run, so translated lines were not tried out in the state the game is in when it reaches them.
+  A `bad-interpolation` problem cannot be found then.
+- `strings_from_source`: present, and `false`, only when the game has no script source files.
+  Text marked for translation in screens and Python could then not be listed, and `strings` counts menu choices only.
+
 ## `coverage`
 
 | Field | Type | Meaning |
@@ -94,7 +107,7 @@ The `routes` stage also has:
 | `file`, `line` | string, integer, or null | Where in the game's script, relative to the game folder. |
 | `label` | string or null | The label being played. |
 | `stage` | string | The stage that found it. |
-| `language` | string or null | The game language active at the time. |
+| `language` | string or null | The game language the finding is about: set for findings in or about a translation, `null` for the game's own language. |
 | `path` | array | The decisions that led here, in order. Each has `kind` (`menu`, `screen`, `input`, `skip` for the outcome chosen for a skipped interaction, or `label` for the label a label run started at, which is then the first step), `file`, `line`, `choice` (the text chosen or typed) and `index`. |
 | `traceback` | string or null | The engine's traceback, when there is one. |
 | `count` | integer | How many times this problem was reached. |
@@ -122,3 +135,9 @@ The `routes` stage also has:
 | `lint` | warning | Lint: a kind of problem this tool does not classify. The message is lint's own. |
 | `unreachable` | info | Lint: a statement no path can reach. |
 | `orphan-translation` | info | Lint: a translation whose original line no longer exists. |
+| `language-switch` | error | The game could not be switched to a language: the set-up code or styles of its translation failed. `file` and `line` are in the translation. |
+| `bad-interpolation` | error | A translated line could not be shown in the state the game was in when the story reached it, usually because it names a variable the game does not have. `file` and `line` are in the translation; `path` is how the story got there. |
+| `untranslated` | warning | A line of dialogue (`message_id` `finding.untranslated_line`) or another text (`finding.untranslated_string`) has no translation into the language in `language`. `file` and `line` are the original's. |
+| `variable-mismatch` | warning | A translation does not show the same `[variables]` as its original. `params` has `missing` and `extra`, each a list separated by commas, or `-` for none. |
+
+A `bad-text` finding with a `language` is about a translation, and its `file` and `line` are in the translation.

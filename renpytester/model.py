@@ -65,19 +65,27 @@ class Report:
     finished: str | None = None
     # File name, without extension, that this run's report and log folder are saved under (REP-009).
     name: str = "report"
+    # The findings by their id, for add(). Rebuilt there whenever the list was changed by other means.
+    _by_id: dict = field(default_factory=dict, repr=False, compare=False)
 
     def add(self, finding):
         """Adds a finding, merging it with an identical one already present (ERR-010)."""
-        for existing in self.findings:
-            if existing.id == finding.id:
-                existing.count += 1
-                # Seen once in a real state is enough to confirm it (EXP-012).
-                existing.possible = existing.possible and finding.possible
-                existing.node = existing.node or finding.node
-                if len(finding.path) < len(existing.path):
-                    existing.path = finding.path
-                return existing
+        # A half-translated game has a finding for every line with no translation, in every language:
+        # too many to compare each new one with all the others.
+        if len(self._by_id) != len(self.findings):
+            self._by_id = {existing.id: existing for existing in self.findings}
+        key = finding.id
+        existing = self._by_id.get(key)
+        if existing is not None:
+            existing.count += 1
+            # Seen once in a real state is enough to confirm it (EXP-012).
+            existing.possible = existing.possible and finding.possible
+            existing.node = existing.node or finding.node
+            if len(finding.path) < len(existing.path):
+                existing.path = finding.path
+            return existing
         self.findings.append(finding)
+        self._by_id[key] = finding
         return finding
 
     def drop_unconfirmed(self, executed):
@@ -110,7 +118,19 @@ class Report:
                     "params": finding.params})
             else:
                 kept.append(finding)
-        self.findings = kept
+
+        # A translation that names a variable the original does not is seen twice in the same way: by
+        # reading it, and when it fails as its line is played (TL-004, TL-006). The failure is kept.
+        failed = {(f.file, f.line, f.language): f for f in kept if f.cls == "bad-interpolation" and f.file}
+        self.findings = []
+        for finding in kept:
+            twin = failed.get((finding.file, finding.line, finding.language))
+            if finding.cls == "variable-mismatch" and twin is not None:
+                twin.also.append({
+                    "stage": finding.stage, "class": finding.cls, "message_id": finding.message_id,
+                    "params": finding.params})
+            else:
+                self.findings.append(finding)
 
     def count(self, severity):
         """Confirmed findings of one severity. Possible issues are counted apart (EXP-013)."""
@@ -130,7 +150,8 @@ class Report:
     def to_dict(self):
         order = {name: index for index, name in enumerate(SEVERITIES)}
         findings = sorted(
-            self.findings, key=lambda f: (f.possible, order[f.severity], f.file or "", f.line or 0, f.cls))
+            self.findings,
+            key=lambda f: (f.possible, order[f.severity], f.file or "", f.line or 0, f.cls, f.language or ""))
         return {
             "schema_version": SCHEMA_VERSION,
             "tool": {"name": "renpytester", "version": self.tool_version},

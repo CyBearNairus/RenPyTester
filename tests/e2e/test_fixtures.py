@@ -17,13 +17,14 @@ def run(sdk, game_copy, tmp_path, capsys):
     def run(name, *extra):
         game = game_copy(name)
         before = folder_digest(game)
+        files_before = sorted(p.relative_to(game).as_posix() for p in game.rglob("*"))
         output = tmp_path / "report"
         # One game process unless the test says otherwise, so that results do not depend on the machine.
         jobs = [] if "--jobs" in extra else ["--jobs", "1"]
         code = cli.main([str(game), "--sdk", str(sdk), "--output", str(output), "--lang", "en", *jobs, *extra])
         text = capsys.readouterr().out
         assert folder_digest(game) == before, "the game folder was changed by the run"
-        assert sorted(p.name for p in (game / "game").iterdir()) == ["script.rpy"]
+        assert sorted(p.relative_to(game).as_posix() for p in game.rglob("*")) == files_before
         files = sorted(output.glob("report-*.json"), key=lambda p: p.stat().st_mtime_ns)
         report = json.loads(files[-1].read_text(encoding="utf-8")) if files else None
         return code, report, text, game
@@ -587,9 +588,11 @@ def test_several_game_processes_give_the_same_report_as_one(sdk, tmp_path, capsy
         reports[jobs] = json.loads(next(output.glob("report-*.json")).read_text(encoding="utf-8"))
         logs = next(output.glob("report-*-logs"))
         # Each process keeps its own event file and its own engine log.
-        assert sorted(p.name for p in logs.iterdir() if p.is_dir()) == ["labels-%d" % i for i in range(1, jobs)]
-        for folder in (p for p in logs.iterdir() if p.is_dir()):
-            assert (folder / "events-run.jsonl").stat().st_size > 0
+        folders = sorted(p.name for p in logs.iterdir() if p.is_dir())
+        assert folders == ["labels-%d" % i for i in range(1, jobs)] + ["translations"]
+        for name in folders[:-1]:
+            assert (logs / name / "events-run.jsonl").stat().st_size > 0
+        assert (logs / "translations" / "events-renpytester_translations.jsonl").stat().st_size > 0
 
     assert reports[1]["stages"]["routes"]["jobs"] == 1
     assert reports[3]["stages"]["routes"]["jobs"] == 3
@@ -642,3 +645,204 @@ def test_engine_safe_mode_does_not_replace_the_story(run):
     assert code == 0
     assert report["stages"]["routes"]["end_reasons"] == {"end": 1}
     assert report["coverage"]["executed"] == report["coverage"]["total"]
+
+
+# --------------------------------------------------------------------- translations (spec 4.7)
+
+TL_FILE = "game/tl/portuguese/script.rpy"
+
+
+@pytest.mark.req("TL-001", "TL-002", "TL-003", "TL-004", "TL-005", "TL-006", "TL-012", "CLI-001", "NFR-003")
+def test_complete_translation_has_nothing_to_report(run):
+    code, report, text, _game = run("tl_clean")
+    assert code == 0
+    assert report["findings"] == []
+    assert report["game"]["languages"] == ["portuguese"]
+    assert report["stages"]["translations"] == {
+        "status": "done", "findings": 0, "played": True, "languages": {"portuguese": {
+            "switched": True, "dialogue": {"translated": 3, "total": 3}, "strings": {"translated": 3, "total": 3}}}}
+    # Nothing is left to say, except, on an older engine, which lint checks it does not have.
+    assert [note["message_id"] for note in report["notes"]] in ([], ["note.lint_options"])
+    assert "portuguese: 3 of 3 lines of dialogue and 3 of 3 other texts translated" in text
+    assert "PASSED" in text
+
+
+@pytest.mark.req("TL-001", "CLI-001")
+def test_game_in_one_language_has_no_translations_to_check(run):
+    code, report, text, _game = run("clean")
+    assert code == 0
+    assert report["complete"] is True
+    assert report["stages"]["translations"] == {"status": "done", "languages": {}}
+    assert "Translations:" not in text
+
+
+@pytest.mark.req("TL-002")
+def test_language_that_cannot_be_switched_to_is_reported(run):
+    code, report, text, _game = run("tl_switch")
+    assert code == 1
+    assert len(report["findings"]) == 1
+    finding = report["findings"][0]
+    assert (finding["class"], finding["severity"], finding["stage"]) == ("language-switch", "error", "translations")
+    assert (finding["file"], finding["line"], finding["language"]) == (TL_FILE, 4, "portuguese")
+    assert finding["params"] == {
+        "language": "portuguese", "type": "NameError", "message": "name 'size_that_was_never_defined' is not defined"}
+    assert "size_that_was_never_defined" in finding["traceback"]
+    assert report["stages"]["translations"]["languages"]["portuguese"]["switched"] is False
+    assert "could not be switched to portuguese" in text
+
+
+@pytest.mark.req("TL-003", "ERR-005", "LINT-002")
+def test_broken_text_tags_in_a_translation_are_reported_where_the_translation_is(run):
+    code, report, _text, _game = run("tl_bad_text")
+    assert code == 1
+    found = sorted((f["line"], f["class"], f["params"]["text"]) for f in report["findings"])
+    assert found == [
+        (4, "bad-text", "Esta fala é {i}importante."),
+        (11, "bad-text", "Pegue a porta {negrito}vermelha{/negrito}")]
+    for finding in report["findings"]:
+        assert (finding["file"], finding["stage"], finding["language"]) == (TL_FILE, "translations", "portuguese")
+        assert finding["severity"] == "error"
+        assert finding["params"]["problem"]
+        # What lint says about the same line is attached, not listed a second time.
+        assert all(other["stage"] == "lint" for other in finding["also"])
+
+
+@pytest.mark.req("TL-004", "TL-006")
+def test_translation_that_fails_in_the_real_game_state_is_found_by_playing(run):
+    code, report, text, _game = run("tl_bad_variable")
+    assert code == 1
+    assert len(report["findings"]) == 1
+    finding = report["findings"][0]
+    assert (finding["class"], finding["severity"], finding["stage"]) == ("bad-interpolation", "error", "translations")
+    assert (finding["file"], finding["line"], finding["language"]) == (TL_FILE, 7, "portuguese")
+    assert (finding["label"], finding["possible"]) == ("start", False)
+    assert "nome_do_jogador" in finding["params"]["message"]
+    assert finding["params"]["text"] == "É bom ver você, [nome_do_jogador]."
+    # Reading the same line shows which variable is wrong; that is attached to the failure.
+    mismatch = [other for other in finding["also"] if other["class"] == "variable-mismatch"]
+    assert [other["params"] for other in mismatch] == [
+        {"language": "portuguese", "missing": "player_name", "extra": "nome_do_jogador"}]
+    # The story itself, played in its own language, has nothing wrong with it.
+    assert report["stages"]["routes"]["end_reasons"] == {"end": 1}
+    assert report["stages"]["translations"]["played"] is True
+    assert "cannot be shown when the game gets here" in text
+
+
+@pytest.mark.req("TL-004", "NFR-002")
+def test_translations_are_not_tried_out_when_the_game_is_not_played_and_the_report_says_so(run):
+    code, report, text, _game = run("tl_bad_variable", "--stages", "translations")
+    assert code == 0
+    assert [(f["class"], f["severity"], f["line"]) for f in report["findings"]] == [("variable-mismatch", "warning", 7)]
+    assert report["stages"]["translations"]["played"] is False
+    assert [note["message_id"] for note in report["notes"]] == ["note.translations_not_played"]
+    assert "The game was not played in this run" in text
+
+
+@pytest.mark.req("TL-004", "CLI-002")
+def test_translations_are_left_alone_when_their_stage_is_not_selected(run):
+    code, report, _text, _game = run("tl_bad_variable", "--stages", "routes")
+    assert code == 0
+    assert report["findings"] == []
+    assert report["stages"]["translations"] == {"status": "not_selected"}
+
+
+@pytest.mark.req("TL-001", "TL-005", "TL-012")
+def test_untranslated_lines_and_texts_are_warnings_with_their_place_in_the_script(run):
+    code, report, text, _game = run("tl_untranslated")
+    assert code == 0
+    assert report["game"]["languages"] == ["portuguese", "spanish"]
+    found = report["findings"]
+    assert [(f["class"], f["severity"], f["stage"], f["language"], f["file"]) for f in found] == [
+        ("untranslated", "warning", "translations", "portuguese", "game/script.rpy")] * 2
+    line, choice = found
+    assert (line["line"], line["message_id"], line["params"]["text"]) == (
+        10, "finding.untranslated_line", "The second line was added later.")
+    assert (choice["message_id"], choice["params"]["text"]) == ("finding.untranslated_string", "A new choice")
+    # Newer engines give the line of the choice, older ones the line of its menu.
+    assert choice["line"] in (12, 16)
+    languages = report["stages"]["translations"]["languages"]
+    assert languages["portuguese"]["dialogue"] == {"translated": 3, "total": 4}
+    assert languages["portuguese"]["strings"] == {"translated": 1, "total": 2}
+    assert languages["spanish"]["dialogue"] == {"translated": 4, "total": 4}
+    assert languages["spanish"]["strings"] == {"translated": 2, "total": 2}
+    assert "This line of dialogue has no portuguese translation: The second line was added later." in text
+    assert "PASSED" in text
+
+
+@pytest.mark.req("TL-005", "CLI-004")
+def test_untranslated_lines_fail_the_run_when_warnings_do(run):
+    code, _report, text, _game = run("tl_untranslated", "--stages", "translations", "--fail-on", "warning")
+    assert code == 1
+    assert "FAILED" in text
+
+
+@pytest.mark.req("TL-001", "CLI-011")
+def test_languages_to_check_can_be_chosen(run):
+    code, report, text, _game = run("tl_untranslated", "--languages", "spanish")
+    assert code == 0
+    assert report["findings"] == []
+    assert report["game"]["languages"] == ["portuguese", "spanish"]
+    assert list(report["stages"]["translations"]["languages"]) == ["spanish"]
+    assert report["settings"]["languages"] == ["spanish"]
+    assert "portuguese:" not in text
+
+
+@pytest.mark.req("TL-001", "CLI-003")
+def test_language_the_game_does_not_have_is_refused(sdk, game_copy, tmp_path, capsys):
+    game = game_copy("tl_untranslated")
+    before = folder_digest(game)
+    code = cli.main([
+        str(game), "--sdk", str(sdk), "--output", str(tmp_path / "report"), "--lang", "en", "--languages",
+        "spanish,klingon"])
+    assert code == 2
+    assert "The game has no language named klingon. Its languages: portuguese, spanish." in capsys.readouterr().out
+    assert folder_digest(game) == before
+
+
+@pytest.mark.req("TL-006")
+def test_translation_that_drops_a_variable_is_a_warning(run):
+    code, report, text, _game = run("tl_dropped_variable")
+    assert code == 0
+    assert len(report["findings"]) == 1
+    finding = report["findings"][0]
+    assert (finding["class"], finding["severity"], finding["stage"]) == ("variable-mismatch", "warning", "translations")
+    assert (finding["file"], finding["line"], finding["language"]) == (TL_FILE, 4, "portuguese")
+    assert finding["params"] == {"language": "portuguese", "missing": "score", "extra": "-"}
+    assert "Left out: score." in text
+
+
+@pytest.mark.req("TL-004", "EXP-015", "NFR-001")
+def test_translation_findings_do_not_depend_on_the_number_of_processes(run):
+    _code, alone, _text, _game = run("tl_bad_variable")
+    _code, together, _text, _game = run("tl_bad_variable", "--jobs", "3")
+    assert alone["findings"] == together["findings"]
+    assert alone["stages"]["translations"] == together["stages"]["translations"]
+
+
+@pytest.mark.req("TL-001", "TL-012", "NFR-003")
+def test_tutorial_translations_are_summarised_for_each_language(sdk, tmp_path, capsys):
+    import shutil
+
+    game = tmp_path / "tutorial"
+    shutil.copytree(sdk / "tutorial", game)
+    before = folder_digest(game)
+    code = cli.main([
+        str(game), "--sdk", str(sdk), "--output", str(tmp_path / "report"), "--lang", "en", "--stages",
+        "translations"])
+    text = capsys.readouterr().out
+    report = json.loads(next((tmp_path / "report").glob("report-*.json")).read_text(encoding="utf-8"))
+    assert code == 0
+    assert report["summary"]["error"] == 0
+    languages = report["stages"]["translations"]["languages"]
+    assert list(languages) == report["game"]["languages"]
+    assert len(languages) >= 8
+    for name, language in languages.items():
+        assert language["switched"] is True, name
+        assert language["dialogue"]["translated"] / language["dialogue"]["total"] > 0.9, name
+        assert language["strings"]["total"] > 100, name
+        assert "%s: %d of %d lines of dialogue" % (
+            name, language["dialogue"]["translated"], language["dialogue"]["total"]) in text
+    # What is left untranslated is listed, each with the language it is missing from.
+    untranslated = [f for f in report["findings"] if f["class"] == "untranslated"]
+    assert untranslated and all(f["language"] in languages and f["severity"] == "warning" for f in untranslated)
+    assert folder_digest(game) == before

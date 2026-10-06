@@ -36,7 +36,7 @@ init 999 python hide:
         import renpy.error as engine_error
         import renpy.execution as execution
 
-        PROTOCOL = 4
+        PROTOCOL = 5
         HARNESS_MARK = "zzz_renpytester_"
 
         # Settings arrive in a file: a list of branches to resume can be too long for an environment variable.
@@ -58,6 +58,8 @@ init 999 python hide:
         # Set when the story itself is not this process's work: another process is exploring it, or
         # this one takes over from one that died after finishing it.
         story_done = bool(settings.get("story_done"))
+        # The game's languages whose translations are to be checked (spec 4.7); none when that stage is off.
+        languages = [str(name) for name in settings.get("languages") or []]
 
         events = open(os.environ["RENPYTESTER_EVENTS"], "a", encoding="utf-8")
 
@@ -105,6 +107,8 @@ init 999 python hide:
             "speculative": False,
             "executed_low": set(),
             "unreported_low": [],
+            # While the translation check switches language: the failures seen in doing so (TL-002).
+            "switching": None,
         }
 
         # ------------------------------------------------------------------------------- helpers
@@ -245,7 +249,7 @@ init 999 python hide:
             nodes.sort(key=lambda n: (n.filename.replace("\\", "/"), n.linenumber, n.name))
             return [node.name for node in nodes]
 
-        def finding(cls, severity, message_id, params, filename=None, line=None, trace=None):
+        def finding(cls, severity, message_id, params, filename=None, line=None, trace=None, **extra):
             if filename is None:
                 filename, line = here()
             node = story.get(renpy.game.context().current)
@@ -253,7 +257,7 @@ init 999 python hide:
                 "finding", cls=cls, severity=severity, message_id=message_id, params=params, file=filename,
                 line=line, label=state["label"], path=list(state["path"]), traceback=trace,
                 node=node_id(node) if node is not None else None,
-                possible=state["speculative"] and cls != "stuck")
+                possible=state["speculative"] and cls != "stuck", **extra)
 
         # ---------------------------------------------------------- snapshots (EXP-002, RUN-010)
 
@@ -469,6 +473,8 @@ init 999 python hide:
                     state["unreported"].append(node_id(node))
                 if is_public_label(node):
                     state["label"] = name
+                if languages and isinstance(getattr(node, "what", None), str):
+                    render_say(node)
 
             if state["steps"] % 64 == 0:
                 now = time.time()
@@ -918,15 +924,19 @@ init 999 python hide:
         renpy.movie_cutscene = movie_cutscene
 
         # Text tags (ERR-005). Interpolation errors need no check: the engine raises on them.
-        def check_text(text):
+        def tag_error(text):
+            """What is wrong with the text tags in `text`, in the engine's own words, or None."""
             if not isinstance(text, str) or "{" not in text:
-                return
+                return None
             try:
-                error = renpy.text.extras.check_text_tags(text, check_unclosed=True)
+                return renpy.text.extras.check_text_tags(text, check_unclosed=True)
             except TypeError:
-                error = renpy.text.extras.check_text_tags(text)  # Older engines always check for unclosed tags.
+                return renpy.text.extras.check_text_tags(text)  # Older engines always check for unclosed tags.
             except Exception as failure:
-                error = str(failure)
+                return str(failure)
+
+        def check_text(text):
+            error = tag_error(text)
             if error:
                 problem("bad-text", "finding.bad_text", {"problem": error, "text": text[:200]}, text)
 
@@ -954,9 +964,295 @@ init 999 python hide:
                         offered = True
                 if not offered and [item for item in items if item[2] is not None]:
                     problem("no-choice", "finding.no_choice", {}, "menu")
+                for item in items:
+                    render_string(item[0])
             return original_menu_statement(items, set_expr, *args, **kwargs)
 
         renpy.exports.menu = menu_statement
+
+        # ------------------------------------------------------------ translations (spec 4.7)
+        #
+        # There are two kinds of check. What can be told by reading the script (lines with no
+        # translation, broken text tags, the variables a translation uses, whether the language can
+        # be switched to) is checked by a command of its own, in a process that plays nothing.
+        # Whether a translated line can be shown in the state the game is really in can only be told
+        # while playing, so that is tried as each line is played, for every language at once: no
+        # route is played a second time for a language.
+
+        translator = renpy.game.script.translator
+        # The engine's own reader of "[variable]" in text. Its place and shape changed between versions;
+        # both give tuples whose second part is the expression, or None for plain text.
+        parse_text = getattr(renpy.substitutions, "parse", None) or renpy.substitutions.formatter.parse
+
+        def spoken(node):
+            """The lines of dialogue in a translation, or in the original it translates."""
+            if isinstance(getattr(node, "what", None), str):
+                return [node]
+            return [n for n in getattr(node, "block", None) or [] if isinstance(getattr(n, "what", None), str)]
+
+        def translation_of(source, language):
+            found = translator.language_translates.get((source.identifier, language))
+            alternate = getattr(source, "alternate", None)
+            if found is None and alternate:
+                found = translator.language_translates.get((alternate, language))
+            return found
+
+        def variables(text):
+            return set(part[1].strip() for part in parse_text(text) if part[1] is not None)
+
+        def place(node):
+            return node.filename.replace("\\", "/"), node.linenumber
+
+        # ---- While playing: can each translation of this line be shown right now? (TL-004)
+
+        def render_failure(text):
+            try:
+                renpy.substitutions.substitute(text, force=True, translate=False)
+                return None
+            except Exception as failure:
+                return failure
+
+        def render_translated(text, filename, line, language):
+            failure = render_failure(text)
+            if failure is None or ("bad-interpolation", filename, line, language) in reported:
+                return
+            reported.add(("bad-interpolation", filename, line, language))
+            params = {
+                "language": language, "type": type(failure).__name__, "message": str(failure), "text": text[:200]}
+            finding(
+                "bad-interpolation", "error", "finding.bad_interpolation", params, filename, line,
+                stage="translations", language=language)
+
+        # For each line of dialogue, its translations that have something to fill in. The script does
+        # not change during a run, so this is worked out once per line.
+        translated_lines = {}
+
+        def translations_to_render(node):
+            ctx = renpy.game.context()
+            source = translator.default_translates.get(getattr(node, "identifier", None) or ctx.translate_identifier)
+            # The identifier can be left over from an earlier line; it counts only if it is this line's.
+            if source is None or not [n for n in spoken(source) if n is node]:
+                return []
+            found = []
+            for language in languages:
+                translated = translation_of(source, language)
+                for line in spoken(translated) if translated is not None else []:
+                    if "[" in line.what:
+                        found.append((line.what,) + place(line) + (language,))
+            return found
+
+        def render_say(node):
+            if node.name not in translated_lines:
+                translated_lines[node.name] = translations_to_render(node)
+            waiting = translated_lines[node.name]
+            if not waiting or not state["starts"] or state["finished"]:
+                return
+            if render_failure(node.what) is not None:
+                return  # The original cannot be shown either. The game is about to say so itself.
+            for text, filename, line, language in waiting:
+                render_translated(text, filename, line, language)
+
+        def render_string(text):
+            """The same for a menu choice, whose translations are looked up by its text."""
+            if not languages or not isinstance(text, str):
+                return
+            original_fails = None
+            for language in languages:
+                strings = translator.strings[language]
+                translated = strings.translations.get(text)
+                if not isinstance(translated, str) or "[" not in translated:
+                    continue
+                if original_fails is None:
+                    original_fails = render_failure(text) is not None
+                if not original_fails:
+                    filename, line = strings.translation_loc.get(text, (None, None))
+                    render_translated(translated, filename, line, language)
+
+        # ---- Without playing: everything that can be told by reading (TL-002, -003, -005, -006)
+
+        def report_translation(cls, severity, message_id, params, filename, line, language, trace=None):
+            emit(
+                "finding", cls=cls, severity=severity, message_id=message_id, params=params, file=filename,
+                line=line, label=None, path=[], traceback=trace, node=None, possible=False, stage="translations",
+                language=language)
+
+        def game_strings():
+            """The texts the game marks for translation, other than dialogue: menu choices, and text
+            marked as translatable in screens and Python. They are found by the engine's own scanner,
+            the one that writes translation files.
+
+            Returns ([(text, file, line)], whether any script source was there to be read)."""
+            import renpy.translation.generation as generation
+
+            found = []
+            seen = set()
+
+            def add(text, filename, line):
+                elided, common = generation.shorten_filename(filename)
+                if common or not isinstance(text, str) or not text or text in seen or HARNESS_MARK in elided:
+                    return
+                seen.add(text)
+                found.append((text, "game/" + elided.replace("\\", "/"), line))
+
+            read_source = False
+            try:
+                import renpy.translation.scanstrings as scanstrings
+
+                for filename in generation.translate_list_files():
+                    elided, common = generation.shorten_filename(filename)
+                    if not common and HARNESS_MARK not in elided:
+                        read_source = True
+                for entry in scanstrings.scan(0, 299, False):
+                    if not entry.comment:
+                        add(entry.text, entry.filename, entry.line)
+            except Exception:
+                read_source = False
+
+            # A game with no script source still knows its menu choices.
+            for filename in sorted(translator.additional_strings):
+                for line, text in translator.additional_strings[filename]:
+                    add(text, filename, line)
+
+            return found, read_source
+
+        def is_translated(text, strings):
+            if text in strings.translations:
+                return True
+            # The engine also accepts a translation of the text without its {#...} notes.
+            return "{#" in text and strings.translate(text) != text
+
+        def check_translated_text(language, originals, text, filename, line):
+            """Checks the text tags of one translated text, and reads the variables in it and in what
+            it translates. Returns (the original's variables, the translation's), or None when they
+            cannot be compared."""
+            error = tag_error(text)
+            if error and [original for original in originals if tag_error(original)]:
+                # The original reads as broken in the same way. It is not shown as game text, or is
+                # wrong itself: "Page {}" is filled in by Python, and is no worse for being translated.
+                error = None
+            if error:
+                report_translation(
+                    "bad-text", "error", "finding.bad_text", {"problem": error, "text": text[:200]}, filename, line,
+                    language)
+            try:
+                wanted = set()
+                for original in originals:
+                    wanted |= variables(original)
+            except Exception:
+                return None  # The original cannot be read either; that is not the translation's doing.
+            try:
+                return wanted, variables(text)
+            except Exception as failure:
+                if not error:
+                    report_translation(
+                        "bad-text", "error", "finding.bad_text", {"problem": str(failure), "text": text[:200]},
+                        filename, line, language)
+                return None
+
+        def compare_variables(language, wanted, used, filename, line):
+            if wanted != used:
+                params = {
+                    "language": language, "missing": ", ".join(sorted(wanted - used)) or "-",
+                    "extra": ", ".join(sorted(used - wanted)) or "-"}
+                report_translation(
+                    "variable-mismatch", "warning", "finding.variable_mismatch", params, filename, line, language)
+
+        def switch_failed(failure):
+            """Notes the exception being handled as a failure of the switch of language under way."""
+            frames = [
+                frame for frame in traceback.extract_tb(sys.exc_info()[2])
+                if is_game_file(frame.filename) and frame.filename.replace("\\", "/").startswith("game/")]
+            filename, line = (None, None)
+            if frames:
+                filename, line = frames[-1].filename.replace("\\", "/"), frames[-1].lineno
+            state["switching"].append((failure, filename, line, traceback.format_exc()))
+
+        def switch_to(language):
+            """Makes `language` the game's language, which runs its translate python and style blocks."""
+            # Older engines let an exception in those blocks out of change_language. Newer ones run
+            # the blocks as script, report the exception the way they report one in the story, and
+            # carry on; report_exception, below, catches those.
+            state["switching"] = []
+            try:
+                renpy.change_language(language)
+            except Exception as failure:
+                if not state["switching"]:
+                    switch_failed(failure)
+            failures, state["switching"] = state["switching"], None
+            for failure, filename, line, trace in failures[:1]:
+                params = {"language": language, "type": type(failure).__name__, "message": str(failure)}
+                report_translation(
+                    "language-switch", "error", "finding.language_switch", params, filename, line, language, trace)
+            return not failures
+
+        def check_language(language, lines, strings):
+            switched = switch_to(language)
+
+            translated_dialogue = 0
+            for source in lines:
+                translated = translation_of(source, language)
+                originals = [node.what for node in spoken(source)]
+                if translated is None:
+                    filename, line = place(source)
+                    params = {"language": language, "text": (originals[0] if originals else "")[:200]}
+                    report_translation(
+                        "untranslated", "warning", "finding.untranslated_line", params, filename, line, language)
+                    continue
+                translated_dialogue += 1
+                wanted, used, first = set(), set(), None
+                for node in spoken(translated):
+                    filename, line = place(node)
+                    compared = check_translated_text(language, originals, node.what, filename, line)
+                    if compared is None:
+                        first = None
+                        break
+                    first = first or (filename, line)
+                    wanted, used = compared[0], used | compared[1]
+                if first is not None:
+                    compare_variables(language, wanted, used, first[0], first[1])
+
+            known = translator.strings[language]
+            translated_strings = 0
+            for text, filename, line in strings:
+                if is_translated(text, known):
+                    translated_strings += 1
+                else:
+                    params = {"language": language, "text": text[:200]}
+                    report_translation(
+                        "untranslated", "warning", "finding.untranslated_string", params, filename, line, language)
+
+            # Every text this language translates, including the engine's own, such as "Quit".
+            placed = []
+            for old, new in known.translations.items():
+                filename, line = known.translation_loc.get(old, (None, None))
+                if isinstance(new, str) and isinstance(filename, str) and is_game_file(filename):
+                    placed.append((filename.replace("\\", "/"), line, old, new))
+            for filename, line, old, new in sorted(placed):
+                compared = check_translated_text(language, [old], new, filename, line)
+                if compared is not None:
+                    compare_variables(language, compared[0], compared[1], filename, line)
+
+            emit(
+                "language", language=language, switched=switched, dialogue=[translated_dialogue, len(lines)],
+                strings=[translated_strings, len(strings)])
+
+        def translations_command():
+            try:
+                lines = [node for node in translator.default_translates.values() if is_game_file(node.filename)]
+                lines.sort(key=lambda node: place(node) + (str(node.identifier),))
+                strings, read_source = game_strings()
+                emit("translations", languages=languages, read_source=read_source)
+                for language in languages:
+                    check_language(language, lines, strings)
+            except Exception as failure:
+                emit(
+                    "harness_error", message="%s: %s" % (type(failure).__name__, failure),
+                    traceback=traceback.format_exc())
+                return False
+            emit("done", steps=0, interactions=0, paths=0, covered=[], limit=None)
+            return False
+
+        renpy.arguments.register_command("renpytester_translations", translations_command)
 
         # ------------------------------------------------ exceptions (ERR-002, RUN-011, NFR-004)
 
@@ -965,6 +1261,9 @@ init 999 python hide:
         def report_exception(error, *args, **kwargs):
             # Every engine version calls this first when a statement raises, while the exception is
             # still being handled. Later steps differ between versions, so this is the one place to hook.
+            if state["switching"] is not None:
+                switch_failed(error)  # A translate block failed as its language was switched to (TL-002).
+                return original_report_exception(error, *args, **kwargs)
             if state["starts"] == 0 or state["finished"]:
                 return original_report_exception(error, *args, **kwargs)
 
@@ -1008,6 +1307,13 @@ init 999 python hide:
             if state["starts"] > 1:
                 # The engine is starting the game again: the story returned to the main menu.
                 next_path("end")
+
+            # A game may leave each language's script unread until the player picks that language.
+            # The translations are needed now, to try them out as their lines are played (TL-004).
+            load_language = getattr(renpy, "load_language", None)
+            if load_language is not None:
+                for language in languages:
+                    load_language(language)
 
             renpy.random.seed(seed)
             random.seed(seed)

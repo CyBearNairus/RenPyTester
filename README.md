@@ -8,8 +8,13 @@ It works on any Ren'Py 8 game, built or in development, and leaves the game fold
 
 It tries every choice of every menu, and tells you how much of the script it played and which labels it never reached.
 
+If the game has translations, each language is checked too.
+You are told which lines of dialogue and which other texts have no translation yet, with the file and line of each.
+You are also told about translations with a broken text tag, translations that show different `[variables]` from the original, and languages the game cannot be switched to.
+As the story is played, every translation of each line is tried out in the state the game is really in, so a translation that uses a variable the game does not have is found without playing the game again in each language.
+
 This is an early version.
-Checking translations, HTML reports and a graphical interface are planned; see [docs/SPEC.md](docs/SPEC.md).
+HTML reports and a graphical interface are planned; see [docs/SPEC.md](docs/SPEC.md).
 
 ## Usage
 
@@ -31,6 +36,8 @@ python -m renpytester PATH_TO_GAME --sdk PATH_TO_RENPY_SDK
 The result is printed and also saved in the `renpytester-report` folder, in a file named after the game and the time of the run, such as `report-the-question-2026-10-06-143005.json`.
 Earlier reports are never overwritten.
 The exit code is 0 when no errors were found, 1 when errors were found, and 3 when the game could not be tested.
+
+To check only some of the game's languages, name them: `--languages french,spanish`.
 
 Messages are in English or Brazilian Portuguese, following your system; use `--lang en` or `--lang pt-BR` to choose.
 Run `python -m renpytester --help` for all options.

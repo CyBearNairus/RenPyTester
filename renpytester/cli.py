@@ -40,6 +40,7 @@ def build_parser():
     parser.add_argument(
         "--strategy", choices=["explore", "first"], default=defaults.strategy,
         help=t("cli.strategy", default=defaults.strategy))
+    parser.add_argument("--languages", metavar="LIST", help=t("cli.languages"))
     parser.add_argument("--no-labels", action="store_true", help=t("cli.no_labels"))
     parser.add_argument("--jobs", type=int, metavar="N", help=t("cli.jobs"))
     parser.add_argument(
@@ -95,6 +96,10 @@ def main(argv=None):
         console.write(console.paint(t(error.message_id, **error.params), ERROR))
         return error.exit_code
 
+    languages = None
+    if args.languages is not None:
+        languages = tuple(i.strip() for i in args.languages.split(",") if i.strip())
+
     if args.jobs is not None and args.jobs < 1:
         error = UsageError("error.bad_jobs")
         console.write(console.paint(t(error.message_id, **error.params), ERROR))
@@ -106,7 +111,7 @@ def main(argv=None):
         timeout=args.timeout, input_value=args.input_value, max_steps=args.max_steps, max_paths=args.max_paths,
         max_time=args.max_time, max_depth=args.max_depth, show_window=args.show_window,
         fail_on=args.fail_on, fail_on_possible=args.fail_on_possible,
-        stages=tuple(i for i in runner.STAGES if i in stages))
+        stages=tuple(i for i in runner.STAGES if i in stages), languages=languages)
 
     if options.show_window:
         console.write(console.paint(t("cli.show_window_warning"), "warning"))

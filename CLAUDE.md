@@ -5,8 +5,9 @@ Runnable from source with plain Python or as a single-file executable, from a te
 
 ## Current state
 
-**Milestones M0 (spikes), M1 (walking skeleton), M2 (lint stage), M3a (exploration), M3b (checks that need no rendering), M3c (getting past minigames), M3d (label runs) and M3e (parallel processes) are done. M4 (translations) is next.**
-[docs/SPEC.md](docs/SPEC.md) version 0.12 is approved; the 0.13 amendments that came out of building M3e are waiting for the owner's approval (decision D17 in spec section 9.2).
+**Milestones M0 (spikes), M1 (walking skeleton), M2 (lint stage), M3a (exploration), M3b (checks that need no rendering), M3c (getting past minigames), M3d (label runs), M3e (parallel processes) and M4 (translations) are done.**
+**M5 (reports and config) is next.**
+[docs/SPEC.md](docs/SPEC.md) version 0.13 is approved; the 0.14 amendments that came out of building M4 are waiting for the owner's approval (decision D18 in spec section 9.2).
 What works today: `python -m renpytester GAME` finds the game and its engine and explores every choice of every menu with no window, using in-memory snapshots, and carries on after a crash or a hang.
 While playing it checks for undefined images, missing image, audio and movie files, broken text tags and menus with nothing to choose.
 It also runs the engine's lint and turns its report into findings, merged with what playing found.
@@ -15,7 +16,10 @@ It leaves the game folder byte-for-byte unchanged.
 A minigame or other interaction it cannot play is skipped, and the story is continued once for each result the script checks for; what is found after that is reported as a possible issue.
 After exploring the story it plays each label by itself, to reach what the story never reaches; what only those label runs find is a possible issue too, and is dropped if the story played the same statement without trouble.
 With `--jobs` above 1 (the default on most computers) the label runs are shared out between extra game processes and lint runs at the same time; the story itself is always explored by one process.
-Not built yet: translations (M4), JUnit/HTML/config (M5), sandbox (M6), GUI (M7), packaging (M8).
+For each language the game has, it reports lines and texts with no translation, broken text tags in translations, translations whose `[variables]` differ from the original's, and a language that cannot be switched to.
+These are checked by a game process of its own that plays nothing.
+While the story is played, every translation of each line is also tried out in the state the game is in, for all languages at once, so no route is played again for a language.
+Not built yet: JUnit/HTML/config (M5), sandbox (M6), GUI (M7), packaging (M8).
 Engine facts and hooks are recorded in [docs/SPIKES.md](docs/SPIKES.md): read it before touching the harness.
 `spikes/` holds the throwaway M0 experiments; never import from it.
 
@@ -60,6 +64,10 @@ The ones that cause real damage if forgotten:
   Machine-readable output (JSON keys, finding classes, exit codes) stays language-neutral.
 - **The GUI is a front end to the same run as the CLI**, never a second implementation.
 - **Never re-implement the engine.** Parsing, lint, translation lookup and text substitution are done by the game's own Ren'Py, never by our code.
+- **A translation is not at fault for what its original does too.**
+  Text such as `"Page {}"` is filled in by Python and reads as a broken tag in every language; a translated line is reported only when the original passes the same check.
+- **Switching language is done only in the translations process, never in one that plays.**
+  A language's `translate python` code changes the game's state, which would change what exploring the story finds.
 - **Harness talks to the orchestrator through a JSON-lines file**, never stdout.
 - **Hook only what every supported engine version has.** Ren'Py 8.0 and 8.6 differ internally (8.0 has no `Context.handle_exception`, and `renpy.error` seen from a game script is a function, not the module).
   Any harness change must pass the test suite on both the oldest and the newest SDK.
@@ -96,6 +104,9 @@ The ones that cause real damage if forgotten:
 
 - **The Question** and **Tutorial** ship inside the Ren'Py SDK and are the known-good baselines.
 - Fixture games under `tests/fixtures/games/` are original content, one seeded bug each.
+  Those whose name starts with `tl_` have a translation under `game/tl/`.
+  The identifier of a translated line (`start_76f3b19b`) is worked out by the engine from the line's text.
+  After changing a line in such a fixture, run the SDK's `translate` command on a copy to get the new identifier, and never commit the `common.rpy` that command also writes.
 
 **Never commit game content or engine code**: no SDK, no assets or scripts copied from any game.
 Paths to these come from environment variables.

@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from renpytester import __version__, discovery, lint
-from renpytester.errors import ToolError
+from renpytester.errors import ToolError, UsageError
 from renpytester.launcher import default_jobs, run_command, run_engine
 from renpytester.model import ERROR, Finding, Report
 from renpytester.routes import Coverage, Frontier
@@ -19,13 +19,14 @@ from renpytester.workspace import PREFIX, Workspace
 
 LINT = "lint"
 ROUTES = "routes"
-STAGES = (LINT, ROUTES)
+TRANSLATIONS = "translations"
+STAGES = (LINT, ROUTES, TRANSLATIONS)
 # How many times a run starts the game again after it died or hung, before giving up on what is left.
 MAX_RELAUNCHES = 20
 # Fewer labels than this are not worth starting another game process for.
 LABELS_PER_PROCESS = 8
 # Stages the specification defines that are not built yet. They are reported as not run, never as passed.
-NOT_BUILT = ("translations", "screens")
+NOT_BUILT = ("screens",)
 
 PARSE_ERROR = re.compile(r'^File "(?P<file>[^"]+)", line (?P<line>\d+): (?P<message>.*)$')
 TRACEBACK_FILE = re.compile(r'File "(?P<file>game/[^"]+)", line (?P<line>\d+)')
@@ -52,6 +53,8 @@ class Options:
     fail_on: str = ERROR
     fail_on_possible: bool = False
     stages: tuple = STAGES
+    # The game's languages to check; None is all of them (TL-001).
+    languages: tuple | None = None
 
 
 def now():
@@ -98,10 +101,13 @@ def load_failure(text, stage):
 
 
 def to_finding(event, stage):
+    # A translation tried out while the story is played is found by the process that plays, but
+    # belongs to the translations stage; the harness says so.
     return Finding(
         event["cls"], event["severity"], event["message_id"], event.get("params") or {}, event.get("file"),
-        event.get("line"), event.get("label"), stage, None, event.get("path") or [], event.get("traceback"),
-        possible=bool(event.get("possible")), node=event.get("node"))
+        event.get("line"), event.get("label"), event.get("stage") or stage, event.get("language"),
+        event.get("path") or [], event.get("traceback"), possible=bool(event.get("possible")),
+        node=event.get("node"))
 
 
 def collect_engine_files(game, output_dir):
@@ -145,6 +151,7 @@ def run(options, on_progress=None):
         "input_value": options.input_value, "max_steps": options.max_steps, "max_paths": options.max_paths,
         "max_time": options.max_time, "max_depth": options.max_depth, "show_window": options.show_window,
         "fail_on": options.fail_on, "fail_on_possible": options.fail_on_possible, "stages": list(options.stages),
+        "languages": list(options.languages) if options.languages is not None else None,
     }
     report = Report(__version__, str(game.basedir), game.kind, settings=settings, started=now())
     report.game = {"renpy_version": ".".join(str(i) for i in game.renpy_version) or None}
@@ -194,8 +201,14 @@ def run(options, on_progress=None):
                     "renpy_version": hello.get("renpy_version"), "python": hello.get("python"),
                     "languages": hello.get("languages", [])})
                 progress("game", game=report.game, game_kind=game.kind)
+                languages = languages_to_check(options, report.game["languages"])
+                translating = TRANSLATIONS in options.stages
+                if translating:
+                    # The translations of each line are tried out as the story is played (TL-004).
+                    harness_settings["languages"] = languages
                 jobs = []
                 found = []
+                translated = []
                 if LINT in options.stages:
                     progress("stage", name=LINT)
                     jobs.append((run_lint, (game, options, work_dir, output_dir, report, progress)))
@@ -204,7 +217,12 @@ def run(options, on_progress=None):
                     jobs.append((lambda *arguments: found.append(explore_routes(*arguments)), (
                         game, options, harness_settings, hello.get("labels"), work_dir, output_dir, report,
                         progress, cancel)))
-                # Lint reads the script while the game is being played, unless only one process may run.
+                if translating:
+                    progress("stage", name=TRANSLATIONS)
+                    jobs.append((lambda *arguments: translated.append(check_translations(*arguments)), (
+                        game, options, harness_settings, languages, work_dir, output_dir, report, cancel)))
+                # Lint and the translation check read the script while the game is being played, unless
+                # only one process may run.
                 if options.jobs > 1:
                     in_parallel(jobs, lambda function, arguments: function(*arguments), cancel)
                 else:
@@ -212,6 +230,10 @@ def run(options, on_progress=None):
                         function(*arguments)
                 if found:
                     finish_routes(game, options, found[0], output_dir, report)
+                # Last, and from here, so that the order of the findings never depends on which
+                # process finished first (NFR-001).
+                if translated:
+                    finish_translations(translated[0], report)
     finally:
         report.finished = now()
 
@@ -264,6 +286,75 @@ def run_lint(game, options, work_dir, output_dir, report, progress):
         report.statistics["script"] = statistics
     stage["status"] = "done"
     stage["findings"] = len(findings)
+
+
+def languages_to_check(options, known):
+    """The game's languages that this run checks: all of them, or those asked for (TL-001)."""
+    if options.languages is None:
+        return list(known)
+    unknown = [name for name in options.languages if name not in known]
+    if unknown:
+        raise UsageError("error.unknown_language", languages=", ".join(unknown), known=", ".join(known) or "-")
+    return [name for name in known if name in options.languages]
+
+
+def check_translations(game, options, harness_settings, languages, work_dir, output_dir, report, cancel):
+    """Checks every language by reading the script, in a game process that plays nothing (spec 4.7).
+
+    Returns the events that process wrote, or None when there was nothing to check or it did not finish.
+    """
+    stage = report.stages[TRANSLATIONS]
+    stage["status"] = "running"
+    stage["languages"] = {}
+    if not languages:
+        stage["status"] = "done"  # A game in one language: nothing to check, and nothing left unchecked.
+        return None
+
+    # A folder of its own: this runs while the game is being played (RUN-015).
+    result = run_engine(
+        game, "renpytester_translations", Path(work_dir) / TRANSLATIONS,
+        Path(output_dir) / "engine-logs" / TRANSLATIONS, harness_settings, max(options.timeout, 300),
+        show_window=options.show_window, cancel=cancel)
+    if result.cancelled:
+        return None
+
+    bug = next((e for e in result.events if e["ev"] == "harness_error"), None)
+    if bug:
+        raise ToolError("error.harness_bug", message=bug.get("message"), traceback=bug.get("traceback"))
+    if not any(e["ev"] == "done" for e in result.events):
+        if PREFIX in result.output:
+            raise ToolError("error.harness_bug", message="", traceback=result.output[-4000:])
+        stage["status"] = "failed"
+        stage["reason"] = "timeout" if result.timed_out else "exit code %s" % result.exit_code
+        report.notes.append({"message_id": "note.translations_failed", "params": {"reason": stage["reason"]}})
+        return None
+    return result.events
+
+
+def finish_translations(events, report):
+    """Puts what the translation check found into the report (spec 4.7)."""
+    stage = report.stages[TRANSLATIONS]
+    if events is None:
+        return
+
+    for event in events:
+        if event["ev"] == "finding":
+            report.add(to_finding(event, TRANSLATIONS))
+        elif event["ev"] == "language":
+            stage["languages"][event["language"]] = {
+                "switched": bool(event["switched"]),
+                "dialogue": dict(zip(("translated", "total"), event["dialogue"])),
+                "strings": dict(zip(("translated", "total"), event["strings"]))}
+        elif event["ev"] == "translations" and not event.get("read_source"):
+            stage["strings_from_source"] = False
+            report.notes.append({"message_id": "note.strings_need_source", "params": {}})
+
+    stage["status"] = "done"
+    stage["findings"] = sum(1 for finding in report.findings if finding.stage == TRANSLATIONS)
+    # Trying translations out in the state the game is really in needs the game to be played (TL-004).
+    stage["played"] = report.stages[ROUTES]["status"] == "done"
+    if not stage["played"]:
+        report.notes.append({"message_id": "note.translations_not_played", "params": {}})
 
 
 def split_labels(labels, jobs):

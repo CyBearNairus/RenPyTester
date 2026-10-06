@@ -79,3 +79,21 @@ The Tutorial number is from a naive explorer that writes an event per decision a
     The save locations are a list on `renpy.loadsave.location`; the engine rebuilds it after init code on 8.6, so `renpy.savelocation.init` is wrapped.
 14. **The engine's lint depends on the order of sets.**
     Its list of unreachable statements differed between runs of the same script until `PYTHONHASHSEED` was fixed.
+15. **A failing `translate python` block is reported differently by old and new engines.**
+    Found while building M4.
+    On 8.0 `renpy.change_language` executes the block's code directly, and the exception comes out of the call.
+    On 8.6 the block is run as script: the engine reports the exception the way it reports one in the story, and `change_language` returns as if nothing had happened.
+    Both go through `renpy.error.report_exception`, or raise, so the harness watches both while it switches.
+16. **A say statement is one node on 8.6 and two on 8.0.**
+    On 8.0 a `Translate` node wraps a block holding the `Say`; on 8.6 most lines are a single `TranslateSay`, whose `block` is empty.
+    On 8.6 nothing clears the context's `translate_identifier` after such a line, so the identifier is trusted only when the line being played is in the block it names.
+17. **The engine's reader of `[variables]` moved.**
+    It is `renpy.substitutions.formatter.parse` on 8.0 and `renpy.substitutions.parse` on 8.6.
+    Both give tuples whose second part is the expression, without its conversion flags.
+18. **Translations are all loaded for any command but `run`.**
+    A game with `config.defer_tl_scripts` (the Tutorial on 8.6) reads a language's script only when that language is chosen, but only under the `run` command.
+    `renpy.load_language` loads one on request; it does not exist on 8.0, where nothing is deferred.
+19. **The engine's own string scanner lists what a translation should contain.**
+    `renpy.translation.scanstrings.scan` returns the menu choices and the text marked for translation, each with its file and line, and says which come from the engine's own files.
+    It reads script source, so a game shipped as compiled files only gives its menu choices, through the translator's `additional_strings`.
+    For a menu choice, 8.0 gives the line of the menu and 8.6 the line of the choice.

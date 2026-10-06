@@ -8,6 +8,8 @@ from renpytester.i18n import t
 from renpytester.model import ERROR, INFO, SEVERITIES, WARNING
 
 COLOURS = {ERROR: "31", WARNING: "33", INFO: "36", "ok": "32", "dim": "2", "bold": "1"}
+# How many lines with no translation the summary lists for each language.
+UNTRANSLATED_SHOWN = 10
 
 
 def message(finding):
@@ -80,7 +82,20 @@ class Console:
     # ------------------------------------------------------------------------------- summary
 
     def listing(self, findings):
-        for finding in sorted(findings, key=lambda f: (f.file or "", f.line or 0)):
+        # A language that is only partly translated has a finding for every line still to do. The
+        # first few are listed for each language; the report has them all (TL-005).
+        shown = {}
+        hidden = {}
+        listed = []
+        for finding in sorted(findings, key=lambda f: (f.file or "", f.line or 0, f.language or "")):
+            if finding.cls == "untranslated":
+                shown[finding.language] = shown.get(finding.language, 0) + 1
+                if shown[finding.language] > UNTRANSLATED_SHOWN:
+                    hidden[finding.language] = hidden.get(finding.language, 0) + 1
+                    continue
+            listed.append(finding)
+
+        for finding in listed:
             self.write("  %s  %s" % (self.paint(where(finding), "bold"), message(finding)))
             if finding.label:
                 self.write("      " + self.paint(t("console.in_label", label=finding.label), "dim"))
@@ -97,6 +112,8 @@ class Console:
             for other in finding.also:
                 text = t("console.also", stage=other["stage"], message=t(other["message_id"], **other["params"]))
                 self.write("      " + self.paint(text, "dim"))
+        for language, count in sorted(hidden.items()):
+            self.write("  " + t("console.untranslated_more", count=count, language=language))
         self.write()
 
     def summary(self, report, json_path, failed):
@@ -135,6 +152,15 @@ class Console:
             self.write(t(
                 "console.script", words=script["dialogue"]["words"], blocks=script["dialogue"]["blocks"],
                 menus=script.get("menus", 0), languages=len(script.get("translations", {}))))
+
+        languages = report.stages.get("translations", {}).get("languages") or {}
+        if languages:
+            self.write(t("console.translations"))
+            for name, language in languages.items():
+                dialogue, strings = language["dialogue"], language["strings"]
+                self.write("  " + t(
+                    "console.translation", language=name, lines=dialogue["translated"], lines_total=dialogue["total"],
+                    strings=strings["translated"], strings_total=strings["total"]))
 
         not_run = [name for name, stage in report.stages.items() if stage["status"] == "not_implemented"]
         if not_run:

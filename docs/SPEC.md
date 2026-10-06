@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Version 0.12 **approved** by the project owner on 2026-10-06. Version 0.13 amendments (from building M3e) await approval. |
+| Status | Version 0.13 **approved** by the project owner on 2026-10-06. Version 0.14 amendments (from building M4) await approval. |
 | Last updated | 2026-10-06 |
 
 This document is the source of truth for what RenPyTester does.
@@ -250,12 +250,13 @@ Interpolation failures need no separate check: the engine raises on them, which 
 
 | ID | Pri | Requirement |
 | --- | --- | --- |
-| TL-001 | MUST | Discover all languages the game defines. `--languages a,b` restricts the set; default is all. |
-| TL-002 | MUST | For each language, switching to it succeeds: its `translate python` and `translate style` blocks execute without exception. |
-| TL-003 | MUST | For each language, every translated dialogue line and string is checked for malformed text tags (ERR-005). |
-| TL-004 | MUST | For each language, every translated line reached during route exploration is rendered with the real game state at that point, so that a bad `[variable]` reference in a translation is found. |
-| TL-005 | MUST | Report untranslated dialogue lines and untranslated strings per language, with counts and locations. Severity *warning*; can be raised to *error* in the config file. |
-| TL-006 | MUST | Report differences between source and translation in the set of interpolated `[variables]` (a variable dropped, added or misspelt). |
+| TL-001 | MUST | Discover all languages the game defines. `--languages a,b` restricts the set; default is all. Naming a language the game does not have is a usage error (exit 2). A game with no translations finishes the stage with nothing to check. |
+| TL-002 | MUST | For each language, switching to it succeeds: its `translate python` and `translate style` blocks execute without exception. The switch is made in a game process of its own that plays nothing, so that a language's set-up code cannot change what exploring the story finds. A failure is a `language-switch` finding of severity *error*, placed at the line of the translation file that failed. |
+| TL-003 | MUST | For each language, every translated dialogue line and string is checked for malformed text tags (ERR-005). The finding is placed at the translation, not at the original line. A translation is not reported when its original reads as malformed too: such text is either not shown as game text (for example `"Page {}"`, which Python code fills in) or wrong in the original, where the other stages report it. |
+| TL-004 | MUST | For each language, every translated line reached during route exploration is rendered with the real game state at that point, so that a bad `[variable]` reference in a translation is found. This is done for every language at once, as each line of dialogue or menu choice is played, by the same processes that play the story and the label runs; no route is played again for a language. A failure is a `bad-interpolation` finding of severity *error*, placed at the translation. It does not end the path, and it is a possible issue under the same rules as any other finding (EXP-012, RUN-021). A translation is not reported when the original line cannot be rendered either. A game that reads each language's script only when the player picks that language has every checked language loaded for the run. When the routes stage does not run, translations are not tried out, and the report says so (NFR-002). |
+| TL-005 | MUST | Report untranslated dialogue lines and untranslated strings per language, with counts and locations. Severity *warning*; can be raised to *error* in the config file. A line of dialogue is untranslated when the language has no translation block for it, and a string when the language has no translation of it. The strings are those the engine's own scanner lists in the game's script files (menu choices, and text marked for translation in screens and Python); the engine's built-in interface texts are not counted. Each finding is placed at the original line. A game with no script source has only its dialogue and menu choices listed, and the report says so. The console lists the first ten findings for each language and says how many more are in the report. |
+| TL-006 | MUST | Report differences between source and translation in the set of interpolated `[variables]` (a variable dropped, added or misspelt). Severity *warning*, placed at the translation. The variables are read by the engine's own text parser; conversion flags and formats (`[name!t]`, `[price:.2f]`) are not part of the comparison. When the same translation also fails as its line is played (TL-004), the difference is attached to that finding and not listed by itself (ERR-010). |
+| TL-012 | MUST | For each language checked, the report says whether it could be switched to, and how many lines of dialogue and how many strings are translated, out of how many. The console summary shows the same, one line per language. |
 | TL-007 | SHOULD | Report orphaned translations: translation blocks whose source line no longer exists. |
 | TL-008 | SHOULD | Report characters in translated text that the font in use for that language cannot draw (the "missing glyph squares" bug). |
 | TL-009 | SHOULD | Report mismatches between source and translation in text tags that change meaning or flow (`{w}`, `{p}`, `{nw}`, `{a}`), severity *info*. |
@@ -300,7 +301,7 @@ Translation testing MUST NOT multiply run time by the number of languages: check
 | CLI-008 | SHOULD | `renpytester info GAME` prints what GAME-006 detects and exits, without running the game's story. |
 | CLI-009 | — | *Withdrawn in 0.2.* Replaced by section 4.14. |
 | CLI-010 | MUST | `--lang en\|pt-BR` selects the interface language (4.15). |
-| CLI-011 | MUST | Run settings that requirements call configurable are available as options: `--seed` (RUN-010), `--timeout` (RUN-008), `--max-steps` (RUN-009), `--input-value` (RUN-005), `--show-window` (GAME-007), `--output` (REP-005). |
+| CLI-011 | MUST | Run settings that requirements call configurable are available as options: `--seed` (RUN-010), `--timeout` (RUN-008), `--max-steps` (RUN-009), `--input-value` (RUN-005), `--show-window` (GAME-007), `--output` (REP-005), `--languages` (TL-001). |
 
 ### 4.11 Configuration (CFG)
 
@@ -458,7 +459,7 @@ The harness's Python version cannot be chosen with a virtual environment, becaus
 | M3c | Getting past minigames (**done** 2026-10-06) | Skipping unplayable interactions and continuing with inferred outcomes. | RUN-017, -019–021, -024, EXP-012–014 (the parts that concern skipped interactions) |
 | M3d | Label runs (**done** 2026-10-06) | Starting at every label, and resolving those findings against normal exploration. | EXP-007, -011–015, -019, -020 |
 | M3e | Parallel processes (**done** 2026-10-06) | Several game processes exploring at once. | RUN-014–016, -025, -026 |
-| M4 | Translations | Language discovery and all TL MUSTs. | TL |
+| M4 | Translations (**done** 2026-10-06) | Language discovery and all TL MUSTs. The SHOULD and COULD rows of 4.7 are left for later, except orphan translations (TL-007), which lint already reports. | TL-001–006, -012 |
 | M5 | Reports and config | JUnit, HTML, config file, ignore rules, baseline. | REP-003–008, CFG, remaining CLI |
 | M6 | Sandbox | Cached copy with incremental synchronisation, cache commands. | SAFE-006, -007, -009–012 |
 | M7 | Graphical interface | The window described in 4.14. | GUI, CLI-007 |
@@ -487,12 +488,13 @@ Open:
 
 | # | Question | Recommendation |
 | --- | --- | --- |
-| D17 | Approve the version 0.13 amendments: RUN-025 and RUN-026 added; RUN-014, RUN-015, EXP-003 and NFR-001 made precise. In particular, only label runs and lint are spread over several processes; the story is explored by one. | Approve. |
+| D18 | Approve the version 0.14 amendments: TL-012 added; TL-001 to TL-006 made precise. In particular: an untranslated line is one finding of severity *warning* each, of which the console lists ten per language; a difference in `[variables]` is a *warning*; the engine's built-in interface texts are not counted as untranslated; and a translation is not reported for a fault its original has too. | Approve. |
 
 Settled on 2026-10-06:
 
 | # | Decision |
 | --- | --- |
+| D17 | Version 0.13 amendments approved: RUN-025 and RUN-026 added; RUN-014, RUN-015, EXP-003 and NFR-001 made precise. Only label runs and lint are spread over several processes; the story is explored by one. |
 | D1 | Test in place by default. Sandbox copy is opt-in (flag and GUI checkbox), cached between runs and synchronised incrementally (SAFE-006, -009 to -012). |
 | D2 | A graphical interface is required for 1.0 (4.14). |
 | D3 | Python 2 engines (Ren'Py 7 and older) are out of scope for now. Doki Doki Literature Club is dropped as a reference game. |
@@ -529,3 +531,4 @@ Settled on 2026-10-06:
 | 2026-10-06 | 0.11 | M3c built. D14 settled (0.10 approved). Added RUN-024; RUN-020 made precise. Possible issues and low-confidence coverage (EXP-012 to EXP-014) built for skipped interactions; label runs will reuse them. |
 | 2026-10-06 | 0.12 | M3d built. D15 settled (0.11 approved). Added EXP-019 (what a label run plays) and EXP-020 (which labels are started at); EXP-007, EXP-011 and EXP-012 made precise. |
 | 2026-10-06 | 0.13 | M3e built. D16 settled (0.12 approved). Added RUN-025 (no safe mode) and RUN-026 (fixed hash seed); RUN-014, RUN-015, EXP-003 and NFR-001 made precise. |
+| 2026-10-06 | 0.14 | M4 built. D17 settled (0.13 approved). Added TL-012 (summary for each language); TL-001 to TL-006 made precise; `--languages` added to CLI-011. |
