@@ -5,11 +5,14 @@ Runnable from source with plain Python or as a single-file executable, from a te
 
 ## Current state
 
-**Milestone M0 (feasibility spikes) is done. Milestone M1 (walking skeleton) is next.**
-[docs/SPEC.md](docs/SPEC.md) version 0.3 was approved on 2026-10-06; the 0.4 amendments that came out of the spikes are waiting for the owner's approval (decision D8 in spec section 9.2).
-Do not start M1 until D8 is settled.
-Spike results are in [docs/SPIKES.md](docs/SPIKES.md): read it before designing anything that touches the engine, it records which hooks and switches work.
-Spikes live in `spikes/` and are throwaway experiments, not product code; do not import from them, rewrite what M1 needs.
+**Milestones M0 (spikes) and M1 (walking skeleton) are done. Milestone M2 (lint stage) is next.**
+[docs/SPEC.md](docs/SPEC.md) version 0.4 is approved; the 0.5 amendments that came out of building M1 are waiting for the owner's approval (decision D9 in spec section 9.2).
+What works today: `python -m renpytester GAME` finds the game and its engine and plays one path with no window.
+It reports crashes and script errors on the console and in `report.json`, in English or Brazilian Portuguese.
+It leaves the game folder byte-for-byte unchanged.
+Not built yet: branching exploration and snapshots (M3), lint (M2), translations (M4), JUnit/HTML/config (M5), sandbox (M6), GUI (M7), packaging (M8).
+Engine facts and hooks are recorded in [docs/SPIKES.md](docs/SPIKES.md): read it before touching the harness.
+`spikes/` holds the throwaway M0 experiments; never import from it.
 
 Ren'Py SDKs for local testing are unpacked under `.cache/sdk/` (git-ignored): the newest and the oldest supported 8.x.
 
@@ -36,8 +39,8 @@ The rules:
 Full detail in spec section 3.
 The ones that cause real damage if forgotten:
 
-- **Two runtimes.** The *orchestrator* (`src/renpytester/`) runs on Python 3.11+.
-  The *harness* (`src/renpytester/harness/`) is injected into the game and runs on the game's embedded Python, which we do not choose: it is whatever Python 3 that Ren'Py 8 release ships, as old as 3.9.
+- **Two runtimes.** The *orchestrator* (`renpytester/`) runs on Python 3.11+.
+  The *harness* (`renpytester/harness/`) is injected into the game and runs on the game's embedded Python, which we do not choose: it is whatever Python 3 that Ren'Py 8 release ships, as old as 3.9.
   Harness code must run on 3.9: no `match`, no `X | Y` type unions, no `tomllib`, no third-party imports.
   Ren'Py 7 and older (Python 2) are out of scope and are refused, not half-supported.
 - **Orchestrator is stdlib-only at runtime**, including the GUI (`tkinter`).
@@ -50,6 +53,10 @@ The ones that cause real damage if forgotten:
 - **The GUI is a front end to the same run as the CLI**, never a second implementation.
 - **Never re-implement the engine.** Parsing, lint, translation lookup and text substitution are done by the game's own Ren'Py, never by our code.
 - **Harness talks to the orchestrator through a JSON-lines file**, never stdout.
+- **Hook only what every supported engine version has.** Ren'Py 8.0 and 8.6 differ internally (8.0 has no `Context.handle_exception`, and `renpy.error` seen from a game script is a function, not the module).
+  Any harness change must pass the test suite on both the oldest and the newest SDK.
+- **A failure in our own code is never reported as a problem in the game.**
+  Harness and orchestrator bugs exit with code 3 and say they are RenPyTester bugs.
 - **Nothing is rendered.** The harness replaces the engine's interaction layer, so render-time failures (missing image files, bad text tags, screen errors) never show up by themselves.
   Each must be checked explicitly when the statement runs.
 - **The engine writes into the game folder by itself** (`game/cache/`, `game/saves/`, logs).
@@ -87,5 +94,21 @@ Paths to these come from environment variables.
   Never wrap in the middle of a sentence to fit a column width; the limit is 250 characters.
 - User-facing messages are written for game developers who may not know Python: say what is wrong and where in their script.
 
-Run a spike: `python spikes/run.py s4_screens.rpy --game tutorial` (add `--sdk 8.0.3` for the oldest engine).
-Build, test and run commands for the product will be added here when milestone M1 creates them.
+## Commands
+
+- Run it: `python -m renpytester GAME --sdk .cache/sdk/renpy-8.6.0-sdk` (`--sdk` is only needed for a project that has no engine of its own).
+- Tests: `python -m pytest` runs everything; `python -m pytest tests/unit` needs no engine.
+  End-to-end tests use the SDK in the `RENPY_SDK` environment variable, or the newest one under `.cache/sdk/`, and are skipped if there is none.
+- Tests on the oldest engine: set `RENPY_SDK` to `.cache/sdk/renpy-8.0.3-sdk` and run `python -m pytest` again.
+  Do this for every harness change.
+- Linters: `python -m flake8 .`, `python tools/lint_rpy.py`, `npx markdownlint-cli2 "**/*.md"`.
+- Run a spike: `python spikes/run.py s4_screens.rpy --game tutorial`.
+
+## Layout
+
+- `renpytester/`: the orchestrator.
+  `cli` parses options, `discovery` finds the game and engine, `workspace` prepares and restores the game folder, and `launcher` runs the engine invisibly.
+  `runner` ties a run together, `model` holds findings and the report, `i18n` and `locale/` hold every user-facing string, and `report/` writes output.
+- `renpytester/harness/zzz_renpytester_harness.rpy`: the script injected into the game.
+- `tests/fixtures/games/`: one small game per behaviour under test. A new finding class needs a new fixture.
+- `docs/report-schema.md`: the JSON report format. Update it with any change to `model.py`.

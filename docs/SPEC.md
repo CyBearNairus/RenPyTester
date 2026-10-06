@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Version 0.3 **approved** by the project owner on 2026-10-06. Version 0.4 amendments (from the M0 spikes) await approval. |
+| Status | Version 0.4 **approved** by the project owner on 2026-10-06. Version 0.5 amendments (from building M1) await approval. |
 | Last updated | 2026-10-06 |
 
 This document is the source of truth for what RenPyTester does.
@@ -155,6 +155,7 @@ The harness must get through a game with no human present.
 | RUN-002 | MUST | Advance through dialogue and narration without waiting for clicks. |
 | RUN-003 | MUST | Resolve `menu` statements by selecting the choice the explorer (4.4) asks for. Choices whose condition is false are not selectable and are recorded as such. |
 | RUN-004 | MUST | Pass through timed pauses, hard pauses, transitions and movies without waiting real time. |
+| RUN-018 | MUST | A hand-built interaction that offers nothing to activate and is not a screen call, such as a movie cutscene, is passed through like a pause (extends RUN-004). |
 | RUN-017 | MUST | A minigame or other interaction with nothing to activate ends the path as `stuck` (RUN-006) with severity *warning*, and the statements that could only be reached through it are listed as not covered for that reason. |
 | RUN-005 | MUST | Answer text input prompts with a configurable value (default `Tester`), honouring the prompt's length and allowed-character limits. |
 | RUN-006 | MUST | Handle `call screen` and other custom interactions by enumerating the activatable elements on screen and choosing among them as decisions, the same way menu choices are. If nothing activatable can be found, report a `stuck` finding and end the path. |
@@ -180,7 +181,7 @@ Exhaustive path coverage is impossible (choices multiply), so the target is **st
 | EXP-003 | MUST | Bound the work: `--max-paths`, `--max-time` and `--max-depth` limits, with defaults that finish a typical short game in minutes. When a limit stops exploration early, the report says so and gives the coverage reached. |
 | EXP-004 | MUST | Record for each finding the full path that led to it. |
 | EXP-005 | MUST | Report coverage: statements executed / total, per file and per label, plus the list of labels never reached. The total counts only statements a playthrough could execute: init-time code, translation blocks, engine test cases and the implicit return at the end of each file are excluded. |
-| EXP-006 | MUST | `--strategy first` plays a single path taking the first available choice everywhere. This is the fast smoke test. |
+| EXP-006 | MUST | `--strategy first` plays a single path taking the first available choice everywhere. This is the fast smoke test. When the same decision point is reached again on that path, the next untried choice is taken, so that hub menus are walked through instead of looped; when every choice there has been tried, the path ends. |
 | EXP-007 | MUST | The `labels` strategy starts execution at every label in isolation, to reach code that normal exploration cannot. It is on by default and runs alongside normal exploration in the same pool of game processes (RUN-014). `--no-labels` turns it off. |
 | EXP-011 | MUST | Normal exploration has priority on the process pool; label runs use only spare capacity and never delay it. |
 | EXP-012 | MUST | When both strategies have finished, each finding from a label run is resolved against normal exploration: if normal exploration executed the same statement without error, the finding is dropped; if normal exploration reported the same problem, the two are merged into one confirmed finding (ERR-010); if normal exploration never executed that statement, the finding is kept as a *possible issue*. |
@@ -275,6 +276,7 @@ Translation testing MUST NOT multiply run time by the number of languages: check
 | CLI-008 | SHOULD | `renpytester info GAME` prints what GAME-006 detects and exits, without running the game's story. |
 | CLI-009 | — | *Withdrawn in 0.2.* Replaced by section 4.14. |
 | CLI-010 | MUST | `--lang en\|pt-BR` selects the interface language (4.15). |
+| CLI-011 | MUST | Run settings that requirements call configurable are available as options: `--seed` (RUN-010), `--timeout` (RUN-008), `--max-steps` (RUN-009), `--input-value` (RUN-005), `--show-window` (GAME-007), `--output` (REP-005). |
 
 ### 4.11 Configuration (CFG)
 
@@ -365,9 +367,10 @@ Indicative, not binding.
 Settled in the design step of milestone M1.
 
 ```text
-src/renpytester/            orchestrator (Python 3.11+, stdlib only)
-    cli, gui, discovery, launcher, sandbox, protocol, explorer, report/, locale/
-src/renpytester/harness/    files injected into the game (engine's Python 3, Ren'Py API)
+renpytester/                orchestrator (Python 3.11+, stdlib only)
+    cli, discovery, workspace, launcher, runner, model, i18n, report/, locale/
+renpytester/harness/        files injected into the game (engine's Python 3, Ren'Py API)
+tools/                      development tools (linters)
 tests/unit/                 orchestrator logic, no engine needed
 tests/e2e/                  real engine against fixture games
 tests/fixtures/games/       tiny purpose-built games, one seeded bug each
@@ -375,6 +378,7 @@ docs/SPEC.md                this file
 docs/report-schema.md       JSON report schema (REP-002)
 ```
 
+The package sits at the repository root, not under `src/`, so that `python -m renpytester` works from a clone with no install step (DIST-001).
 The M0 spikes settled where the exploration logic lives: in the harness (ARCH-008).
 
 ---
@@ -423,7 +427,7 @@ The harness's Python version cannot be chosen with a virtual environment, becaus
 | | Milestone | Delivers | Requirements |
 | --- | --- | --- | --- |
 | M0 | Feasibility spikes (**done** 2026-10-06) | Throwaway experiments answering the assumptions in 9.1, on the oldest and newest Ren'Py 8.x. Results in [SPIKES.md](SPIKES.md). | — |
-| M1 | Walking skeleton | Discover, launch invisibly, inject, clean up, play one path (`--strategy first`), catch exceptions, console + JSON report. Message catalogue in both languages from the first message onward. | GAME-001–007, I18N-001–006, SAFE-001–005, RUN-001–005, -007, -008, -011, EXP-006, ERR-001, -002, REP-001, -002, CLI-001, -003 |
+| M1 | Walking skeleton (**done** 2026-10-06) | Discover, launch invisibly, inject, clean up, play one path (`--strategy first`), catch exceptions, console + JSON report. Message catalogue in both languages from the first message onward. | GAME-001–007, I18N-001–006, SAFE-001–005, RUN-001–005, -007, -008, -011, EXP-006, ERR-001, -002, REP-001, -002, CLI-001, -003 |
 | M2 | Lint | Lint stage and finding merge. | LINT, ERR-010 |
 | M3 | Exploration | Coverage-guided branching, snapshots, parallel processes, label runs and their resolution, limits, coverage report, custom screens. | EXP-001–005, -007, -011–015, RUN-006, -009, -010, -012, -014–016, ERR-003–006 |
 | M4 | Translations | Language discovery and all TL MUSTs. | TL |
@@ -455,7 +459,7 @@ Open:
 
 | # | Question | Recommendation |
 | --- | --- | --- |
-| D8 | Approve the version 0.4 amendments: ARCH-007, ARCH-008, SAFE-001 reworded, SAFE-013, SAFE-014, RUN-017, NFR-009, and the clarifications to EXP-005 and LINT-001. | Approve. They record what the spikes showed and add no new scope. |
+| D9 | Approve the version 0.5 amendments: EXP-006 clarified (revisited decision points), RUN-018, CLI-011, and the package at the repository root. | Approve. They record how M1 was built. |
 
 Settled on 2026-10-06:
 
@@ -466,6 +470,7 @@ Settled on 2026-10-06:
 | D3 | Python 2 engines (Ren'Py 7 and older) are out of scope for now. Doki Doki Literature Club is dropped as a reference game. |
 | D4 | Untranslated lines are warnings. |
 | D5 | Label runs are on by default, run alongside normal exploration, and their findings are filtered against it and reported separately as possible issues (EXP-007, -011 to -015). |
+| D8 | Version 0.4 amendments approved (the owner committed M0 and asked for M1). |
 | D6 | The HTML report is required for 1.0 and must be concise (REP-004). |
 | D7 | Command name `renpytester`. Interface in English and Brazilian Portuguese (4.15). |
 
@@ -479,3 +484,4 @@ Settled on 2026-10-06:
 | 2026-10-06 | 0.2 | Owner decisions D1–D4, D6, D7. Dropped Python 2 engines and DDLC (COMPAT-003 withdrawn). Cached incremental sandbox (SAFE-009 to -012). GUI required (4.14, CLI-009 withdrawn). Interface languages en and pt-BR (4.15). HTML report now MUST. Invisible operation now MUST (ARCH-006, GAME-007, NFR-007). Parallel exploration (RUN-014 to -016). |
 | 2026-10-06 | 0.3 | D5 settled: label runs on by default alongside normal exploration, resolved and reported as possible issues (EXP-007 now MUST, EXP-011 to -015 added). Markdown lint requirement (NFR-008); tables reformatted to pass it. |
 | 2026-10-06 | 0.4 | M0 spike results. Added ARCH-007, ARCH-008, SAFE-013, SAFE-014, RUN-017, NFR-009 (code lint). Reworded SAFE-001. Clarified EXP-005 and LINT-001. Section 9.1 replaced by a pointer to SPIKES.md and the four assumptions still unverified. |
+| 2026-10-06 | 0.5 | M1 built. EXP-006 clarified. Added RUN-018 and CLI-011. Planned structure updated to the package at the repository root. D8 settled. |

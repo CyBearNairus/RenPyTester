@@ -1,0 +1,180 @@
+"""End-to-end tests: the real command line, a real engine, the fixture games (spec 7.2)."""
+
+import json
+
+import pytest
+
+from renpytester import cli
+from tests.conftest import folder_digest
+
+pytestmark = pytest.mark.e2e
+
+
+@pytest.fixture
+def run(sdk, game_copy, tmp_path, capsys):
+    """Runs the command line on a copy of a fixture game. Returns (exit code, report, console text, game path)."""
+
+    def run(name, *extra):
+        game = game_copy(name)
+        before = folder_digest(game)
+        output = tmp_path / "report"
+        code = cli.main([str(game), "--sdk", str(sdk), "--output", str(output), "--lang", "en", *extra])
+        text = capsys.readouterr().out
+        assert folder_digest(game) == before, "the game folder was changed by the run"
+        assert sorted(p.name for p in (game / "game").iterdir()) == ["script.rpy"]
+        report_file = output / "report.json"
+        report = json.loads(report_file.read_text(encoding="utf-8")) if report_file.exists() else None
+        return code, report, text, game
+
+    return run
+
+
+@pytest.mark.req(
+    "CLI-001", "CLI-003", "GAME-004", "GAME-006", "GAME-007", "RUN-001", "RUN-002", "RUN-004", "RUN-007", "SAFE-001",
+    "SAFE-002", "SAFE-004", "SAFE-013", "NFR-003")
+def test_clean_game_passes(run):
+    code, report, text, _game = run("clean")
+    assert code == 0
+    assert report["complete"] is True
+    assert report["findings"] == []
+    assert report["game"]["name"] == "Clean Fixture"
+    assert report["game"]["version"] == "1.0"
+    assert report["game"]["kind"] == "project"
+    assert report["game"]["renpy_version"].startswith("8.")
+    assert report["stages"]["routes"] == {"status": "done", "paths": 1, "end_reasons": ["end"]}
+    assert "PASSED" in text
+    assert "Clean Fixture" in text
+
+
+@pytest.mark.req("RUN-003", "RUN-005", "EXP-004", "EXP-006")
+def test_decisions_are_made_and_recorded(run, tmp_path):
+    code, report, _text, _game = run("exception_after_choices", "--input-value", "A very long name indeed")
+    assert code == 1
+    path = report["findings"][0]["path"]
+    assert [(step["kind"], step["choice"]) for step in path] == [("input", "A very long"), ("menu", "Left")]
+    assert path[1]["index"] == 0
+    assert (path[1]["file"], path[1]["line"]) == ("game/script.rpy", 12)
+
+
+@pytest.mark.req("ERR-002", "RUN-011", "REP-001", "REP-006", "CLI-003")
+def test_exception_is_reported_where_it_happened(run):
+    code, report, text, _game = run("exception")
+    assert code == 1
+    assert len(report["findings"]) == 1
+    finding = report["findings"][0]
+    assert finding["class"] == "exception"
+    assert finding["severity"] == "error"
+    assert (finding["file"], finding["line"], finding["label"]) == ("game/script.rpy", 13, "chapter_two")
+    assert finding["params"] == {"type": "NameError", "message": "name 'undefined_function' is not defined"}
+    assert "undefined_function" in finding["traceback"]
+    assert finding["stage"] == "routes"
+    assert "game/script.rpy:13" in text
+    assert "FAILED" in text
+
+
+@pytest.mark.req("ERR-002")
+def test_jump_to_a_missing_label_is_reported(run):
+    code, report, _text, _game = run("bad_jump")
+    assert code == 1
+    finding = report["findings"][0]
+    assert (finding["class"], finding["file"], finding["line"]) == ("exception", "game/script.rpy", 8)
+    assert "no_such_label" in finding["params"]["message"]
+
+
+@pytest.mark.req("ERR-001", "REP-008")
+def test_script_that_does_not_parse_is_reported(run, tmp_path):
+    code, report, _text, _game = run("parse_error")
+    assert code == 1
+    finding = report["findings"][0]
+    assert (finding["class"], finding["file"], finding["line"]) == ("parse-error", "game/script.rpy", 8)
+    assert report["stages"]["routes"]["status"] == "blocked"
+    assert (tmp_path / "report" / "engine-logs" / "errors.txt").is_file()
+
+
+@pytest.mark.req("RUN-008", "ERR-006")
+def test_game_that_stops_making_progress_is_shut_down(run):
+    code, report, _text, _game = run("hang", "--timeout", "3")
+    assert code == 1
+    finding = report["findings"][0]
+    assert finding["class"] == "hang"
+    assert finding["params"] == {"seconds": 3}
+
+
+@pytest.mark.req("RUN-009", "ERR-006")
+def test_endless_loop_ends_the_path_with_a_warning(run):
+    code, report, _text, _game = run("loop", "--max-steps", "500")
+    assert code == 0
+    finding = report["findings"][0]
+    assert (finding["class"], finding["severity"]) == ("loop", "warning")
+    assert report["stages"]["routes"]["end_reasons"] == ["loop"]
+
+
+@pytest.mark.req("RUN-007")
+def test_game_that_quits_itself_is_a_normal_ending(run):
+    code, report, _text, _game = run("quits")
+    assert code == 0
+    assert report["findings"] == []
+    assert report["stages"]["routes"]["end_reasons"] == ["quit"]
+
+
+@pytest.mark.req("ERR-011")
+def test_exception_the_game_catches_itself_is_not_reported(run):
+    code, report, _text, _game = run("caught_exception")
+    assert code == 0
+    assert report["findings"] == []
+
+
+@pytest.mark.req("RUN-010", "NFR-001")
+def test_same_seed_gives_the_same_report(run):
+    def essentials(report):
+        return json.dumps([report["findings"], report["coverage"], report["statistics"]], sort_keys=True)
+
+    _code, first, _text, _game = run("random", "--seed", "42")
+    _code, second, _text, _game = run("random", "--seed", "42")
+    assert essentials(first) == essentials(second)
+    assert first["settings"]["seed"] == 42
+
+
+@pytest.mark.req("I18N-001", "CLI-010")
+def test_console_output_in_portuguese(sdk, game_copy, tmp_path, capsys):
+    game = game_copy("exception")
+    code = cli.main([str(game), "--sdk", str(sdk), "--output", str(tmp_path / "report"), "--lang", "pt-BR"])
+    text = capsys.readouterr().out
+    assert code == 1
+    assert "O jogo quebrou aqui" in text
+    assert "FALHOU" in text
+
+
+@pytest.mark.req("GAME-005", "CLI-003")
+def test_project_without_an_engine_exits_3(game_copy, tmp_path, capsys, monkeypatch):
+    monkeypatch.delenv("RENPY_SDK", raising=False)
+    game = game_copy("clean")
+    code = cli.main([str(game), "--output", str(tmp_path / "report"), "--lang", "en"])
+    assert code == 3
+    assert "--sdk" in capsys.readouterr().out
+    assert sorted(p.name for p in (game / "game").iterdir()) == ["script.rpy"]
+
+
+@pytest.mark.req("REP-005")
+def test_report_folder_inside_the_game_is_refused(sdk, game_copy, capsys):
+    game = game_copy("clean")
+    code = cli.main([str(game), "--sdk", str(sdk), "--output", str(game / "report"), "--lang", "en"])
+    assert code == 3
+    assert not (game / "report").exists()
+
+
+@pytest.mark.req("NFR-003", "COMPAT-002", "ARCH-004")
+@pytest.mark.parametrize("name", ["the_question", "tutorial"])
+def test_reference_games_report_no_errors(sdk, tmp_path, capsys, name):
+    import shutil
+
+    game = tmp_path / name
+    shutil.copytree(sdk / name, game)
+    before = folder_digest(game)
+    code = cli.main([str(game), "--sdk", str(sdk), "--output", str(tmp_path / "report"), "--lang", "en"])
+    capsys.readouterr()
+    report = json.loads((tmp_path / "report" / "report.json").read_text(encoding="utf-8"))
+    assert code == 0
+    assert report["summary"]["error"] == 0
+    assert report["game"]["languages"]
+    assert folder_digest(game) == before
