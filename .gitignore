@@ -218,3 +218,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# RenPyTester: downloaded SDKs, sandbox copies, run output (never committed, spec NFR-006)
+.cache/
+renpytester-report/

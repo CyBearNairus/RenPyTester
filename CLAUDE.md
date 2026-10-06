@@ -5,10 +5,13 @@ Runnable from source with plain Python or as a single-file executable, from a te
 
 ## Current state
 
-**Specification phase. There is no code yet.**
-[docs/SPEC.md](docs/SPEC.md) is Draft 0.3 and has not been approved.
-Do not start implementation until the spec's status line says *Approved*.
-The first implementation work is milestone M0 (feasibility spikes), not product code.
+**Milestone M0 (feasibility spikes) is done. Milestone M1 (walking skeleton) is next.**
+[docs/SPEC.md](docs/SPEC.md) version 0.3 was approved on 2026-10-06; the 0.4 amendments that came out of the spikes are waiting for the owner's approval (decision D8 in spec section 9.2).
+Do not start M1 until D8 is settled.
+Spike results are in [docs/SPIKES.md](docs/SPIKES.md): read it before designing anything that touches the engine, it records which hooks and switches work.
+Spikes live in `spikes/` and are throwaway experiments, not product code; do not import from them, rewrite what M1 needs.
+
+Ren'Py SDKs for local testing are unpacked under `.cache/sdk/` (git-ignored): the newest and the oldest supported 8.x.
 
 ## Spec-driven workflow
 
@@ -47,6 +50,10 @@ The ones that cause real damage if forgotten:
 - **The GUI is a front end to the same run as the CLI**, never a second implementation.
 - **Never re-implement the engine.** Parsing, lint, translation lookup and text substitution are done by the game's own Ren'Py, never by our code.
 - **Harness talks to the orchestrator through a JSON-lines file**, never stdout.
+- **Nothing is rendered.** The harness replaces the engine's interaction layer, so render-time failures (missing image files, bad text tags, screen errors) never show up by themselves.
+  Each must be checked explicitly when the statement runs.
+- **The engine writes into the game folder by itself** (`game/cache/`, `game/saves/`, logs).
+  Back up and restore, or remove, everything it touches; redirect logs with `RENPY_LOG_BASE`.
 - **Never modify the game.** Only add files prefixed `zzz_renpytester_`, and always remove them, including after a crash or Ctrl+C.
   Saves and persistent data go to a temp directory.
   In sandbox mode, write nothing at all to the original.
@@ -65,6 +72,14 @@ Paths to these come from environment variables.
 - Licence: GPL-3.0.
 - English for code, the spec and commit messages.
   The tool's interface and reports are in English and Brazilian Portuguese.
+- **All linting is required, for every script and document, with zero problems reported** (spec NFR-008, NFR-009).
+  This includes spikes, tools and tests, not only product code.
+  Run all three before finishing any change, and fix what they report instead of silencing it:
+  `python -m flake8 .` for Python (config in `.flake8`, line length 120);
+  `python tools/lint_rpy.py` for Ren'Py scripts (spaces only, indentation in multiples of 4, line length 120, plus Flake8 on the Python inside `python:` blocks);
+  `npx markdownlint-cli2 "**/*.md"` for Markdown.
+- In `.rpy` files, never align continuation lines under an opening bracket: that produces indentation that is not a multiple of 4.
+  Break after the bracket and indent the continuation by 4.
 - Every Markdown file must pass `markdownlint` with the repository's `.markdownlint.json` (spec NFR-008).
   Run `npx markdownlint-cli2 "**/*.md"` before finishing any change that touches a `.md` file.
   Tables use the spaced form: `| --- | --- |`, never `|---|---|`.
@@ -72,4 +87,5 @@ Paths to these come from environment variables.
   Never wrap in the middle of a sentence to fit a column width; the limit is 250 characters.
 - User-facing messages are written for game developers who may not know Python: say what is wrong and where in their script.
 
-Build, test and run commands will be added here when milestone M1 creates them.
+Run a spike: `python spikes/run.py s4_screens.rpy --game tutorial` (add `--sdk 8.0.3` for the oldest engine).
+Build, test and run commands for the product will be added here when milestone M1 creates them.

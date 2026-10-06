@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | **Draft 0.3**, under review, not yet approved for implementation |
+| Status | Version 0.3 **approved** by the project owner on 2026-10-06. Version 0.4 amendments (from the M0 spikes) await approval. |
 | Last updated | 2026-10-06 |
 
 This document is the source of truth for what RenPyTester does.
@@ -99,6 +99,13 @@ The graphical interface is built on the standard library's `tkinter` for the sam
 Because the game is driven at high speed, a visible window would flash rapidly, which is a photosensitivity hazard as well as a nuisance.
 A visible window exists only when the user explicitly asks for one.
 
+**ARCH-007 (No rendering).** The harness replaces the engine's interaction layer, so a run draws no frames and waits for nothing.
+A consequence is that problems which a player would only see when a frame is drawn do not surface by themselves.
+Every such class in 4.5 (missing files, undefined images, malformed text, screen errors) is therefore checked explicitly by the harness at the moment the statement executes.
+
+**ARCH-008 (Exploration lives in the harness).** Decisions, snapshots and coverage are handled inside the game process, which explores many paths per launch.
+The orchestrator launches, supervises and divides work between processes; it does not steer individual choices.
+
 ---
 
 ## 4. Functional requirements
@@ -123,7 +130,9 @@ A user must be able to trust the tool with their only copy of a project.
 
 | ID | Pri | Requirement |
 | --- | --- | --- |
-| SAFE-001 | MUST | Default mode is **in place**: the game is tested where it is. The only change made to the game directory is the addition of harness files with a reserved name prefix (`zzz_renpytester_`). No existing file is modified, moved or deleted by RenPyTester. |
+| SAFE-001 | MUST | Default mode is **in place**: the game is tested where it is. RenPyTester itself only adds harness files with a reserved name prefix (`zzz_renpytester_`). When the run ends the game directory is byte-for-byte what it was before (SAFE-013). |
+| SAFE-013 | MUST | The engine writes into the game directory on its own during any launch: it rewrites the compiled caches under `game/cache/`, creates `game/saves/`, and writes log files beside the game. Logs are redirected to the output directory. Files the engine modifies are backed up before the run and restored after it; files and folders it creates are removed. This holds after a crash, Ctrl+C or timeout, and leftovers from a killed run are repaired on the next start (SAFE-003). |
+| SAFE-014 | MUST | The engine's own script backup into the user's profile is disabled for test runs, so nothing is written outside the game directory, the output directory and the tool's cache. |
 | SAFE-002 | MUST | All harness files, including compiled files the engine generates from them, are removed when the run ends, including on error, Ctrl+C, or timeout. |
 | SAFE-003 | MUST | On startup, detect harness files left behind by a previous run that was killed, remove them, and say so. |
 | SAFE-004 | MUST | Saves and persistent data are redirected to a temporary directory. The user's real saves and persistent data are never read or written. |
@@ -146,6 +155,7 @@ The harness must get through a game with no human present.
 | RUN-002 | MUST | Advance through dialogue and narration without waiting for clicks. |
 | RUN-003 | MUST | Resolve `menu` statements by selecting the choice the explorer (4.4) asks for. Choices whose condition is false are not selectable and are recorded as such. |
 | RUN-004 | MUST | Pass through timed pauses, hard pauses, transitions and movies without waiting real time. |
+| RUN-017 | MUST | A minigame or other interaction with nothing to activate ends the path as `stuck` (RUN-006) with severity *warning*, and the statements that could only be reached through it are listed as not covered for that reason. |
 | RUN-005 | MUST | Answer text input prompts with a configurable value (default `Tester`), honouring the prompt's length and allowed-character limits. |
 | RUN-006 | MUST | Handle `call screen` and other custom interactions by enumerating the activatable elements on screen and choosing among them as decisions, the same way menu choices are. If nothing activatable can be found, report a `stuck` finding and end the path. |
 | RUN-007 | MUST | Treat return to main menu, end of script, and a game-initiated quit as a normal end of path, not an error, and continue with the next path. |
@@ -169,7 +179,7 @@ Exhaustive path coverage is impossible (choices multiply), so the target is **st
 | EXP-002 | MUST | Reach deep branches without replaying the game from the start for every path (snapshot and restore of game state at decision points). |
 | EXP-003 | MUST | Bound the work: `--max-paths`, `--max-time` and `--max-depth` limits, with defaults that finish a typical short game in minutes. When a limit stops exploration early, the report says so and gives the coverage reached. |
 | EXP-004 | MUST | Record for each finding the full path that led to it. |
-| EXP-005 | MUST | Report coverage: statements executed / total, per file and per label, plus the list of labels never reached. |
+| EXP-005 | MUST | Report coverage: statements executed / total, per file and per label, plus the list of labels never reached. The total counts only statements a playthrough could execute: init-time code, translation blocks, engine test cases and the implicit return at the end of each file are excluded. |
 | EXP-006 | MUST | `--strategy first` plays a single path taking the first available choice everywhere. This is the fast smoke test. |
 | EXP-007 | MUST | The `labels` strategy starts execution at every label in isolation, to reach code that normal exploration cannot. It is on by default and runs alongside normal exploration in the same pool of game processes (RUN-014). `--no-labels` turns it off. |
 | EXP-011 | MUST | Normal exploration has priority on the process pool; label runs use only spare capacity and never delay it. |
@@ -208,7 +218,7 @@ Every finding MUST carry: a stable ID, class, severity, message, script file and
 
 | ID | Pri | Requirement |
 | --- | --- | --- |
-| LINT-001 | MUST | Run the engine's built-in lint and convert its output into findings, with file and line where lint provides them. |
+| LINT-001 | MUST | Run the engine's built-in lint and convert its output into findings, with file and line where lint provides them. Each kind of lint message is mapped to a severity; lint's own exit code is not used, because it reports informational items such as unreachable statements as failures. |
 | LINT-002 | MUST | Lint findings that duplicate a finding from another stage are merged with it (ERR-010). |
 | LINT-003 | SHOULD | Include lint's statistics (word count, dialogue blocks, per-language counts) in the report summary. |
 
@@ -344,6 +354,7 @@ It is a front end to the same run the command line performs, not a second implem
 | NFR-005 | SHOULD | **Speed.** A default run on a 50,000-word game completes in under 5 minutes on a 4-core desktop. |
 | NFR-007 | MUST | **Unobtrusive.** During a default run the user can keep working on the same machine: nothing appears on screen except the tool's own progress display, no sound plays, and focus is never taken (ARCH-006). |
 | NFR-008 | MUST | **Documentation lint.** Every Markdown file in the repository passes `markdownlint` using the configuration in `.markdownlint.json`. This is checked in CI and a failure blocks the merge. Rules are changed in that file, never silenced inline without a comment giving the reason. |
+| NFR-009 | MUST | **Code lint.** Every script in the repository passes its linter with no problems reported: Python files pass `flake8` with the configuration in `.flake8` (line length 120); Ren'Py script files pass `tools/lint_rpy.py`, which enforces Ren'Py layout rules (spaces only, indentation in multiples of four, line length 120) and runs `flake8` on the Python inside them. This covers product code, tests, tools and spikes alike, is checked in CI, and a failure blocks the merge. |
 | NFR-006 | MUST | **Licence hygiene.** No game content or engine code is committed to this repository or bundled in releases. RenPyTester is GPL-3.0. |
 
 ---
@@ -364,7 +375,7 @@ docs/SPEC.md                this file
 docs/report-schema.md       JSON report schema (REP-002)
 ```
 
-Where the exploration logic lives (in the orchestrator, steering the harness over the protocol; or in the harness, with the orchestrator only supervising) is an open design question, to be answered by the M0 spikes.
+The M0 spikes settled where the exploration logic lives: in the harness (ARCH-008).
 
 ---
 
@@ -411,7 +422,7 @@ The harness's Python version cannot be chosen with a virtual environment, becaus
 
 | | Milestone | Delivers | Requirements |
 | --- | --- | --- | --- |
-| M0 | Feasibility spikes | Throwaway experiments answering every item in 9.1, on the oldest and newest Ren'Py 8.x. Spec revised with the results. | — |
+| M0 | Feasibility spikes (**done** 2026-10-06) | Throwaway experiments answering the assumptions in 9.1, on the oldest and newest Ren'Py 8.x. Results in [SPIKES.md](SPIKES.md). | — |
 | M1 | Walking skeleton | Discover, launch invisibly, inject, clean up, play one path (`--strategy first`), catch exceptions, console + JSON report. Message catalogue in both languages from the first message onward. | GAME-001–007, I18N-001–006, SAFE-001–005, RUN-001–005, -007, -008, -011, EXP-006, ERR-001, -002, REP-001, -002, CLI-001, -003 |
 | M2 | Lint | Lint stage and finding merge. | LINT, ERR-010 |
 | M3 | Exploration | Coverage-guided branching, snapshots, parallel processes, label runs and their resolution, limits, coverage report, custom screens. | EXP-001–005, -007, -011–015, RUN-006, -009, -010, -012, -014–016, ERR-003–006 |
@@ -426,33 +437,25 @@ The harness's Python version cannot be chosen with a virtual environment, becaus
 
 ## 9. Open items
 
-### 9.1 Technical assumptions to verify in M0
+### 9.1 Technical assumptions
 
-Nothing below has been tested yet.
-Each is a belief about the engine that the design depends on.
-If one turns out false, the affected requirements are revised before M1 starts.
+The fourteen assumptions listed here in version 0.3 were tested in milestone M0.
+The results, evidence and measurements are in [SPIKES.md](SPIKES.md).
 
-1. A loose `.rpy` file added to `game/` is loaded by a built distribution whose own scripts are archived.
-2. A built distribution can run engine commands such as `lint` from its bundled engine, without the SDK.
-3. Saves and persistent data can be redirected by command-line option or environment variable (SAFE-004).
-4. There is a hook point to intercept uncaught exceptions before the engine shows its error screen (ERR-002, RUN-011).
-5. Game state can be snapshotted and restored at a menu from inside the harness, quickly and without touching disk more than necessary (EXP-002).
-   Candidates: the rollback system, or in-memory saves.
-6. The engine can run with no window, no audio device and no focus stealing on Windows, Linux and macOS (GAME-007, ARCH-006).
-   This is now a MUST, so it is the first spike to run.
-   If true headless operation is not possible, find out whether a hidden or off-screen window is.
-7. The elements of an arbitrary screen that a player could click can be enumerated from inside the harness (RUN-006).
-8. A translated line can be looked up and substituted for another language without changing the active language of the running game (TL-004 and the no-multiplication rule).
-9. How much of lint already covers TL-003, -005 and -007, so that it is reused, not duplicated.
-10. A font's glyph coverage can be queried from inside the engine (TL-008).
-11. Several processes of the same game can run at once from one game directory without conflicting, for example over compiled script files or a single-instance lock (RUN-014, RUN-015).
-12. How parallel processes behave in sandbox mode when the game writes to its own directory: whether one shared copy is enough or each process needs its own.
-13. Which is the oldest Ren'Py 8.x release worth supporting, and which Python it embeds (ARCH-001, COMPAT-002).
-14. `tkinter` can accept a folder dropped onto the open window using only the standard library; if not, GUI-001 is met by browsing and by dropping on the executable.
+Still unverified, and the requirements that depend on them:
+
+1. Invisible operation on Linux and macOS (GAME-007). Confirmed on Windows only.
+2. Querying a font's glyph coverage from inside the engine (TL-008).
+3. Parallel processes in sandbox mode when the game writes to its own directory (RUN-014 with SAFE-006).
+4. Dropping a folder onto the open window with the standard library alone (GUI-001 has a fallback).
 
 ### 9.2 Decisions
 
-No decisions are open.
+Open:
+
+| # | Question | Recommendation |
+| --- | --- | --- |
+| D8 | Approve the version 0.4 amendments: ARCH-007, ARCH-008, SAFE-001 reworded, SAFE-013, SAFE-014, RUN-017, NFR-009, and the clarifications to EXP-005 and LINT-001. | Approve. They record what the spikes showed and add no new scope. |
 
 Settled on 2026-10-06:
 
@@ -475,3 +478,4 @@ Settled on 2026-10-06:
 | 2026-10-06 | 0.1 | First draft. |
 | 2026-10-06 | 0.2 | Owner decisions D1–D4, D6, D7. Dropped Python 2 engines and DDLC (COMPAT-003 withdrawn). Cached incremental sandbox (SAFE-009 to -012). GUI required (4.14, CLI-009 withdrawn). Interface languages en and pt-BR (4.15). HTML report now MUST. Invisible operation now MUST (ARCH-006, GAME-007, NFR-007). Parallel exploration (RUN-014 to -016). |
 | 2026-10-06 | 0.3 | D5 settled: label runs on by default alongside normal exploration, resolved and reported as possible issues (EXP-007 now MUST, EXP-011 to -015 added). Markdown lint requirement (NFR-008); tables reformatted to pass it. |
+| 2026-10-06 | 0.4 | M0 spike results. Added ARCH-007, ARCH-008, SAFE-013, SAFE-014, RUN-017, NFR-009 (code lint). Reworded SAFE-001. Clarified EXP-005 and LINT-001. Section 9.1 replaced by a pointer to SPIKES.md and the four assumptions still unverified. |
