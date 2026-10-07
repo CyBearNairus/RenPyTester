@@ -2,8 +2,9 @@
 # (spec DIST-002, DIST-003, DIST-005, DIST-006). Started by pushing a tag such as v0.1.0, which must
 # be the version in renpytester/__init__.py.
 #
-# Each executable is tested before it is released: the end-to-end tests are run from source, and then
-# against the executable on the newest and the oldest supported Ren'Py.
+# Each executable is tested before it is released: the end-to-end tests are run against it on the
+# newest and the oldest supported Ren'Py. The few that reach into the program itself cannot be, and
+# are run from source here; the rest are run from source by the CI workflow on every push.
 # The Windows executable is required. The Linux and macOS ones are attached when their build and
 # tests pass, and left out when they do not, without holding back the release (DIST-003 is a SHOULD).
 # Windows has two: the window program, which a double click opens with no console, and the console
@@ -17,12 +18,21 @@ on:
   # Started by hand, it builds and tests the executables and releases nothing: a rehearsal.
   workflow_dispatch:
 
+# One run for a commit. A tag takes the place of a rehearsal of the same commit that is still going,
+# which would only repeat it; a rehearsal never stops a release, and waits for it instead.
+concurrency:
+  group: release-${{ github.sha }}
+  cancel-in-progress: ${{ github.ref_type == 'tag' }}
+
 permissions:
   contents: read
 
 env:
   RENPY_NEWEST: "8.6.0"
   RENPY_OLDEST: "8.0.3"
+  # How many end-to-end tests run at a time. Each starts game processes of its own, and the runners
+  # have three or four processors.
+  E2E_WORKERS: "3"
 
 jobs:
   lint:
@@ -90,7 +100,7 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - run: python -m pip install pytest pyinstaller
+      - run: python -m pip install pytest pytest-xdist pyinstaller
 
       # The engine is fetched for the tests and never committed or put in the executable (NFR-006).
       - uses: ./.github/actions/renpy-sdk
@@ -99,18 +109,19 @@ jobs:
 
       - name: Unit tests
         run: python -m pytest tests/unit
-      - name: End-to-end tests, from source
-        run: python -m pytest tests/e2e
+      # Only those that are skipped when the executable is tested, so that each test is run once here.
+      - name: End-to-end tests that reach into the program, from source
+        run: python -m pytest tests/e2e -m source -n "$E2E_WORKERS"
 
       - name: Build the executable
         run: python tools/build_exe.py
 
       - name: End-to-end tests, the executable, newest Ren'Py
-        run: RENPYTESTER_EXE="$PWD/${{ matrix.built }}" python -m pytest tests/e2e
+        run: RENPYTESTER_EXE="$PWD/${{ matrix.built }}" python -m pytest tests/e2e -n "$E2E_WORKERS"
       - name: End-to-end tests, the executable, oldest Ren'Py
         run: >
           RENPYTESTER_EXE="$PWD/${{ matrix.built }}" RENPY_SDK="$PWD/.cache/sdk/renpy-$RENPY_OLDEST-sdk"
-          python -m pytest tests/e2e
+          python -m pytest tests/e2e -n "$E2E_WORKERS"
 
       - name: Tests of the executable itself, the window program
         if: matrix.windowed

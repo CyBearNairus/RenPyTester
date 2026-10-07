@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Version 0.29 **approved** by the project owner on 2026-10-07. |
+| Status | Version 0.31 **approved** by the project owner on 2026-10-07. |
 | Last updated | 2026-10-07 |
 
 This document is the source of truth for what RenPyTester does.
@@ -340,7 +340,7 @@ Translation testing MUST NOT multiply run time by the number of languages: check
 | DIST-002 | MUST | Single-file executable for Windows, with the harness and the graphical interface embedded. No installer, no Python needed. It is made with PyInstaller by `tools/build_exe.py`, for the system the tool is run on, and written to `dist/`. It holds the files the package lists as its data (DIST-004), taken from the same list, so that the two cannot come to differ. It has the program's icon (GUI-013). On Windows two are made from the same code, a window program and a console program (CLI-007), and each says what it is in its file properties, which Windows shows under *Details*: the program's name, its version, its author, its licence and the address of its repository, all taken from the source. |
 | DIST-003 | SHOULD | Single-file executables for Linux and macOS. They are built and tested by the same release process as the Windows one (DIST-005), on Linux x64, macOS Intel and macOS Apple Silicon. One that does not build, or does not pass its tests, is left out of the release and does not hold it back. |
 | DIST-004 | SHOULD | Installable as a package (`pipx install`, `uv tool install`) exposing the `renpytester` command. Every file of the package that is not code is listed as its data, and a test fails when one is not. |
-| DIST-005 | MUST | Executables are built by CI from a tagged commit and attached to a GitHub release. No hand-built releases. The same process can be started by hand as a rehearsal, which builds and tests everything and releases nothing. The tag is `v` followed by the version in the source (`v0.1.0`); a tag that is anything else is refused and nothing is released. Before an executable is attached, the linters, the unit tests and the end-to-end tests (DIST-006) have passed on the system it was built on. The files are named after the system, not the version (`renpytester-windows-x64.exe`), so that a link to the latest one keeps working. On Windows that name is the window program's, since it is the one to download and double-click, and the console program is `renpytester-windows-x64-console.exe`. |
+| DIST-005 | MUST | Executables are built by CI from a tagged commit and attached to a GitHub release. No hand-built releases. The same process can be started by hand as a rehearsal, which builds and tests everything and releases nothing. The tag is `v` followed by the version in the source (`v0.1.0`); a tag that is anything else is refused and nothing is released. Before an executable is attached, the linters, the unit tests and the end-to-end tests (DIST-006) have passed on the system it was built on: the end-to-end tests against the executable, and from source those that cannot be run against it. The rest are run from source on every push (7.3), not a second time for a release. A tag takes the place of a rehearsal of the same commit that is still going. The files are named after the system, not the version (`renpytester-windows-x64.exe`), so that a link to the latest one keeps working. On Windows that name is the window program's, since it is the one to download and double-click, and the console program is `renpytester-windows-x64-console.exe`. |
 | DIST-006 | MUST | The executable and the from-source run behave identically; the test suite's end-to-end tests run against both. With the `RENPYTESTER_EXE` environment variable naming an executable, the end-to-end tests that go through the command line start it in place of the source; those that reach into the program itself (the window's, and stopping a run at a chosen moment) cannot, and are skipped. They are run this way on the oldest and the newest supported engine. On Windows the whole suite is run against the console program; the window program, which is the same code, is given the tests that are about the executable itself. The executable does not hand its own libraries on to the programs it starts: the place it unpacked them to is taken out of the search for libraries before the game's engine is started, so that the engine loads its own. |
 
 ### 4.14 Graphical interface (GUI)
@@ -445,7 +445,10 @@ A requirement is *done* when it has at least one passing test that names it.
 A test of the project itself fails when a MUST requirement, or an architecture constraint of section 3, is named by no test, and when a test names a requirement that does not exist.
 
 Version matrix: orchestrator unit tests run on every supported Python from 3.11 to the current release (locally with the `py` launcher and one virtual environment per version; in CI as a matrix).
+In CI every one of those Pythons is tried on Linux, and the oldest and the newest on Windows and macOS.
 End-to-end tests run against the oldest supported and the newest Ren'Py 8.x SDK.
+End-to-end tests can be run several at a time (`pytest -n 3`, with `pytest-xdist`), and CI runs them so: no test may depend on another, or work in a folder another uses, such as a game inside the SDK.
+A push made while an earlier one is still being checked takes its place.
 The harness's Python version cannot be chosen with a virtual environment, because it is the one inside each SDK; testing several SDK versions is what covers it.
 
 ### 7.4 Acceptance for 1.0
@@ -522,6 +525,8 @@ Settled on 2026-10-06:
 
 | # | Decision |
 | --- | --- |
+| D33 | Version 0.30 approved on 2026-10-07, and with it how D32 was done (DIST-005, section 7.3): a release runs from source only the end-to-end tests the executable cannot be given, so a commit is tagged on the strength of the CI run of its push for the rest; and on Windows and macOS the unit tests are run on the oldest and the newest Python only. |
+| D32 | Asked for by the owner on 2026-10-07, after releasing v0.1.3 took three workflow runs of close to an hour doing much the same: CI is to do less and take less time. Tests are run several at a time; a release does not repeat from source what CI has run; a tag takes the place of a rehearsal of the same commit, and a push that of an earlier one still being checked (DIST-005, 7.3). |
 | D31 | Version 0.28 amendments approved on 2026-10-07: RUN-006 made precise, and EXP-021 added, with EXP-006 following it. A path goes round a hub again while that reaches something new, so a game that is walked around is played much further than before; such a run takes longer and can be the one that `--max-time` stops. |
 | D30 | Version 0.26 approved on 2026-10-07, and with it how D29 was done: Windows gets two executables, a window program for a double click and a console program for terminals and build servers (CLI-007, DIST-002, DIST-005, DIST-006). One program cannot be both: Windows gives a console window to every console program that a double click starts, before any of its code runs, and no terminal waits for a window program. |
 | D28 | Version 0.25 amendments approved on 2026-10-07: UI-001 and UI-002 made precise, `screens` a default stage (CLI-001), RUN-008 and ARCH-004 made precise, how speed is measured (RUN-013, NFR-005), and the tests of each item of the acceptance (7.4). |
@@ -589,3 +594,5 @@ Settled on 2026-10-06:
 | 2026-10-07 | 0.27 | D30 settled (0.26 approved). Nothing is waiting for approval. |
 | 2026-10-07 | 0.28 | Found by testing a game that is walked around on a map, of which 3% was played. RUN-006 made precise: an element is activatable however its click was written, which the hotspots of a map were not. Added EXP-021 (a path goes round a hub again while that reaches something new); EXP-006 follows. D31 opened. |
 | 2026-10-07 | 0.29 | D31 settled (0.28 approved). Nothing is waiting for approval. |
+| 2026-10-07 | 0.30 | Owner's request (D32): a shorter CI. DIST-005 says which tests a release runs from source, and that a tag takes the place of a rehearsal; section 7.3 says that end-to-end tests are run several at a time and which Pythons are tried on which system. D33 opened. |
+| 2026-10-07 | 0.31 | D33 settled (0.30 approved). Nothing is waiting for approval. |

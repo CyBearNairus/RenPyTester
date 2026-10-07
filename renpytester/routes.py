@@ -80,6 +80,7 @@ class Frontier:
         self.label_runs = 0
         # The decisions of the path being played right now.
         self.path = []
+        # The last place the path being played is known to have been: where a crash or a hang is put.
         self.last = {}
         self.reasons = {}
         self.paths = 0
@@ -104,7 +105,7 @@ class Frontier:
             self.label_runs += 1
             if event["label"] in (self.labels or []):
                 self.labels.remove(event["label"])
-            self.path = [{name: step.get(name) for name in DECISION_FIELDS} for step in event.get("path") or []]
+            self.begin(event)
         elif kind == "decision":
             self.path.append({name: event.get(name) for name in DECISION_FIELDS})
             self.last = {"file": event.get("file"), "line": event.get("line")}
@@ -114,14 +115,23 @@ class Frontier:
             self.waiting.add((event.get("label"), tuple(event["prefix"])))
         elif kind == "branch_start":
             self.waiting.discard((event.get("label"), tuple(event["prefix"])))
-            self.path = [{name: step.get(name) for name in DECISION_FIELDS} for step in event.get("path") or []]
+            self.begin(event)
         elif kind == "path_end":
             self.paths += 1
             self.reasons[event["reason"]] = self.reasons.get(event["reason"], 0) + 1
             self.path = []
+            self.last = {}
         elif kind == "done":
             self.done = event
             self.interactions = event.get("interactions") or 0
+
+    def begin(self, event):
+        """A path starts: at a label, or from a snapshot at one of its decisions."""
+        self.path = [{name: step.get(name) for name in DECISION_FIELDS} for step in event.get("path") or []]
+        # Where the path before this one last was says nothing of this one. That place came from a
+        # heartbeat, which is sent by the clock, so a crash was put somewhere else on a busier machine.
+        step = self.path[-1] if self.path else {}
+        self.last = {"file": step.get("file"), "line": step.get("line")}
 
     @property
     def made_up(self):

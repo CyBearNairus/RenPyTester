@@ -590,11 +590,16 @@ def comparable(report):
 
 @pytest.mark.req("RUN-014", "RUN-015", "EXP-015", "NFR-001")
 def test_several_game_processes_give_the_same_report_as_one(sdk, tmp_path, capsys):
+    import shutil
+
+    # A copy: the Tutorial writes its own files as it starts, and other tests read the SDK's meanwhile.
+    game = tmp_path / "tutorial"
+    shutil.copytree(sdk / "tutorial", game)
     reports = {}
     for jobs in (1, 3):
         output = tmp_path / ("report-%d" % jobs)
         code = cli.main([
-            str(sdk / "tutorial"), "--sdk", str(sdk), "--output", str(output), "--lang", "en", "--jobs", str(jobs)])
+            str(game), "--sdk", str(sdk), "--output", str(output), "--lang", "en", "--jobs", str(jobs)])
         capsys.readouterr()
         assert code == 0
         reports[jobs] = json.loads(next(output.glob("report-*.json")).read_text(encoding="utf-8"))

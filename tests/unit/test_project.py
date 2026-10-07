@@ -113,6 +113,22 @@ def test_every_supported_system_and_python_is_tested_on_every_push():
     assert [version.strip().strip('"') for version in pythons.split(",")][:2] == ["3.11", "3.12"]
 
 
+@pytest.mark.req("DIST-005", "DIST-006")
+def test_a_release_runs_every_end_to_end_test_once_and_ci_runs_them_from_source():
+    release = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    # From source only what the executable cannot be given; then the executable on each engine, and
+    # the window program on Windows.
+    assert release.count("pytest tests/e2e") == 4
+    assert release.count('python -m pytest tests/e2e -m source -n "$E2E_WORKERS"') == 1
+    assert release.count('RENPYTESTER_EXE="$PWD/${{ matrix.built }}"') == 2
+    assert release.count('RENPYTESTER_EXE="$PWD/${{ matrix.windowed }}"') == 1
+    assert 'RENPY_SDK="$PWD/.cache/sdk/renpy-$RENPY_OLDEST-sdk"' in release
+    # The rest from source is the CI workflow's, on every push.
+    assert "python -m pytest tests/e2e -n" in CI and "-m source" not in CI
+    # A tag takes the place of a rehearsal, and never the other way round.
+    assert "cancel-in-progress: ${{ github.ref_type == 'tag' }}" in release
+
+
 @pytest.mark.req("NFR-008", "NFR-009")
 def test_every_linter_is_run_on_every_push_with_the_repositorys_own_rules():
     for command in ("python -m flake8 .", "python tools/lint_rpy.py", 'markdownlint-cli2 "**/*.md"'):

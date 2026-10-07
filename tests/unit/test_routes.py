@@ -65,6 +65,26 @@ def test_frontier_knows_what_is_waiting_and_where_the_current_path_is():
     assert frontier.done is None
 
 
+@pytest.mark.req("RUN-012", "NFR-001")
+def test_a_path_that_dies_is_placed_where_it_started_and_not_where_the_one_before_it_was():
+    frontier = Frontier(Coverage())
+    frontier.feed({"ev": "start", "map": MAP, "labels": ["other"]})
+    # A heartbeat comes by the clock: on a slow machine there is one from before the story.
+    frontier.feed({"ev": "heartbeat", "file": "renpy/common/00start.rpy", "line": 195, "steps": 64})
+    frontier.feed({"ev": "path_end", "reason": "end", "covered": []})
+    assert frontier.last == {}
+
+    step = {"kind": "label", "file": "game/b.rpy", "line": 1, "choice": "other", "index": 0}
+    frontier.feed({"ev": "label_start", "label": "other", "path": [step]})
+    assert frontier.last == {"file": "game/b.rpy", "line": 1}
+    frontier.feed({"ev": "heartbeat", "file": "game/b.rpy", "line": 2, "steps": 128})
+    assert frontier.last == {"file": "game/b.rpy", "line": 2}
+
+    frontier.feed({"ev": "path_end", "reason": "end", "covered": []})
+    frontier.feed({"ev": "branch_start", "prefix": [1], "path": []})
+    assert frontier.last == {"file": None, "line": None}
+
+
 @pytest.mark.req("EXP-014")
 def test_statements_reached_only_after_a_skip_are_counted_apart():
     coverage = Coverage()

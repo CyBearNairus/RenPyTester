@@ -12,7 +12,7 @@ dependencies = []
 dynamic = ["version"]
 
 [project.optional-dependencies]
-dev = ["pytest", "flake8", "pillow", "pyinstaller"]
+dev = ["pytest", "pytest-xdist", "flake8", "pillow", "pyinstaller"]
 
 [project.scripts]
 renpytester = "renpytester.cli:main"

@@ -7,7 +7,7 @@ Runnable from source with plain Python or as a single-file executable, from a te
 
 **Milestones M0 (spikes), M1 (walking skeleton), M2 (lint stage), M3a (exploration), M3b (checks that need no rendering), M3c (getting past minigames), M3d (label runs), M3e (parallel processes) and M4 (translations) are done.**
 **M5 (reports and config), M6 (sandbox), M7 (graphical interface), M8 (packaging) and M9 (hardening) are done too: every milestone of the spec is built.**
-[docs/SPEC.md](docs/SPEC.md) version 0.29 is approved, and nothing in it is waiting for the owner.
+[docs/SPEC.md](docs/SPEC.md) version 0.31 is approved, and nothing in it is waiting for the owner.
 What the spec still lists and nobody has built are SHOULD and COULD rows only; `tests/unit/test_project.py` fails when a MUST requirement is named by no test.
 What works today: `python -m renpytester GAME` finds the game and its engine and explores every choice of every menu with no window, using in-memory snapshots, and carries on after a crash or a hang.
 While playing it checks for undefined images, missing image, audio and movie files, broken text tags and menus with nothing to choose.
@@ -35,7 +35,8 @@ The window has the program's own icon, lists its languages by name, and has an *
 On Windows it makes two: `dist/renpytesterw.exe`, a window program for a double click, and `dist/renpytester.exe`, a console program for terminals.
 Pushing a tag such as `v0.1.0` has GitHub build it, test it and attach it to a release.
 v0.1.1 was released that way with all four executables: Windows, Linux, macOS Apple Silicon and macOS Intel; from v0.1.2 Windows has two.
-Before tagging, start the same workflow by hand as a rehearsal: an executable that fails its tests is left out of the release without stopping it.
+Before tagging, start the same workflow by hand as a rehearsal, and wait for it to end: an executable that fails its tests is left out of the release without stopping it.
+Pushing the tag while the rehearsal of the same commit is still going cancels the rehearsal, since the tag's run does the same work.
 If a job of the tag's own run fails on a test that depends on timing, `gh run rerun RUN --failed` runs it again for the same tag.
 Engine facts and hooks are recorded in [docs/SPIKES.md](docs/SPIKES.md): read it before touching the harness.
 `spikes/` holds the throwaway M0 experiments; never import from it.
@@ -228,6 +229,8 @@ Paths to these come from environment variables.
   End-to-end tests use the SDK in the `RENPY_SDK` environment variable, or the newest one under `.cache/sdk/`, and are skipped if there is none.
   The `run` fixture, in `tests/e2e/conftest.py`, passes `--jobs 1` unless the test gives its own, so that results do not depend on the machine.
   The test of speed (`tests/e2e/test_acceptance.py`) takes over a minute; its limits on time are not applied on a build server, where the `CI` environment variable is set.
+  `python -m pytest tests/e2e -n 4` runs the end-to-end tests four at a time, with `pytest-xdist`, in a third of the time; CI runs them three at a time.
+  So a test must work in its own temporary folder only: copy a game of the SDK before running it, never run it where it is.
 - Tests on the oldest engine: set `RENPY_SDK` to `.cache/sdk/renpy-8.0.3-sdk` and run `python -m pytest` again.
   Do this for every harness change.
 - Linters: `python -m flake8 .`, `python tools/lint_rpy.py`, `npx markdownlint-cli2 "**/*.md"`.
@@ -251,6 +254,8 @@ Paths to these come from environment variables.
 - `tests/fixtures/games/`: one small game per behaviour under test. A new finding class needs a new fixture.
 - `tools/`: development tools. `build_exe.py` builds the executable, `make_icon.py` draws the icon, `lint_rpy.py` lints Ren'Py scripts.
 - `.github/workflows/`: `ci.yml` runs the linters, the unit tests and the end-to-end tests from source on every push; `release.yml` builds and publishes the executables from a tag, or rehearses that when started by hand.
+  A release runs the end-to-end tests against the executable, and from source only those marked `source`; the rest from source are CI's, so do not tag a commit whose CI run failed.
+  A step added to either workflow that repeats what the other already does for the same commit is a step too many.
   `.github/actions/renpy-sdk` gets the SDKs for both, from the cache when it can.
   A cache is only of use to later runs when a run on `main` saved it, which is why CI does.
   Each job writes what it did to the run's summary page: `tests/conftest.py` does that for every pytest run, `tools/build_exe.py` for the build.
