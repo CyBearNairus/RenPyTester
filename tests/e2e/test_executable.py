@@ -40,6 +40,25 @@ def test_executable_is_this_version_and_needs_no_python(exe, tmp_path):
     assert done.stdout.decode().strip() == "renpytester " + __version__
 
 
+def subsystem(path):
+    """What kind of Windows program a file is: 2 for a window program, 3 for a console program."""
+    data = Path(path).read_bytes()[:4096]
+    header = int.from_bytes(data[0x3C:0x40], "little")
+    assert data[header:header + 4] == b"PE\0\0"
+    return int.from_bytes(data[header + 0x5C:header + 0x5E], "little")
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="only Windows programs come in two kinds and carry properties")
+@pytest.mark.req("CLI-007", "DIST-002")
+def test_windows_executable_is_the_kind_its_name_says_and_carries_its_properties(exe):
+    # renpytesterw.exe, released as renpytester-windows-x64.exe, never has a console window.
+    windowed = exe.stem.endswith("w") or (exe.stem.endswith("x64") and "console" not in exe.stem)
+    assert subsystem(exe) == (2 if windowed else 3)
+    data = exe.read_bytes()
+    for text in ("ProductName", "RenPyTester", "CyBearNairus", "FileVersion", __version__, "GPL-3.0"):
+        assert text.encode("utf-16-le") in data, text
+
+
 @pytest.mark.req("DIST-002", "GUI-013", "I18N-001")
 def test_executable_carries_the_harness_the_window_and_every_data_file(exe):
     readers = pytest.importorskip("PyInstaller.archive.readers")

@@ -6,6 +6,9 @@
 # against the executable on the newest and the oldest supported Ren'Py.
 # The Windows executable is required. The Linux and macOS ones are attached when their build and
 # tests pass, and left out when they do not, without holding back the release (DIST-003 is a SHOULD).
+# Windows has two: the window program, which a double click opens with no console, and the console
+# program for terminals and build servers (CLI-007). The whole suite is run against the console
+# program; the window program is the same code, and is given the tests that are about the executable.
 name: Release
 
 on:
@@ -62,7 +65,9 @@ jobs:
         include:
           - os: windows-latest
             built: dist/renpytester.exe
-            asset: renpytester-windows-x64.exe
+            asset: renpytester-windows-x64-console.exe
+            windowed: dist/renpytesterw.exe
+            windowed_asset: renpytester-windows-x64.exe
             required: true
           # The oldest Linux on offer, so that the executable runs on older systems too.
           - os: ubuntu-22.04
@@ -107,6 +112,10 @@ jobs:
           RENPYTESTER_EXE="$PWD/${{ matrix.built }}" RENPY_SDK="$PWD/.cache/sdk/renpy-$RENPY_OLDEST-sdk"
           python -m pytest tests/e2e
 
+      - name: Tests of the executable itself, the window program
+        if: matrix.windowed
+        run: RENPYTESTER_EXE="$PWD/${{ matrix.windowed }}" python -m pytest tests/e2e/test_executable.py
+
       - name: Keep the logs of failed tests
         if: failure()
         uses: actions/upload-artifact@v7
@@ -123,10 +132,13 @@ jobs:
         run: |
           mkdir release
           cp "${{ matrix.built }}" "release/${{ matrix.asset }}"
+          if [ -n "${{ matrix.windowed }}" ]; then
+            cp "${{ matrix.windowed }}" "release/${{ matrix.windowed_asset }}"
+          fi
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.asset }}
-          path: release/${{ matrix.asset }}
+          path: release/
           if-no-files-found: error
 
   publish:

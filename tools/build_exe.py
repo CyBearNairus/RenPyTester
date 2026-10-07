@@ -1,9 +1,12 @@
 """Build the single-file executable (spec DIST-002, DIST-003, DIST-005).
 
-    python tools/build_exe.py            builds dist/renpytester (renpytester.exe on Windows)
+    python tools/build_exe.py            builds dist/renpytester (on Windows, renpytester.exe and renpytesterw.exe)
     python tools/build_exe.py --tag TAG  only checks that TAG is the tag of this version, and builds nothing
 
 Needs PyInstaller, a development tool only. The executable is for the system it is built on.
+On Windows there are two, as Python itself has python.exe and pythonw.exe: renpytesterw.exe is a
+window program, which a double click opens with no console window at all, and renpytester.exe is
+a console program, which a terminal waits for and gets the exit code of.
 It carries the files that pyproject.toml lists as the package's data, so that it and an installed
 package (DIST-004) cannot come to differ in what they hold.
 """
@@ -21,16 +24,46 @@ PACKAGE = ROOT / "renpytester"
 BUILD = ROOT / "build"
 DIST = ROOT / "dist"
 NAME = "renpytester"
+# The executable for a double click on Windows, which has no console (CLI-007).
+WINDOWED = NAME + "w"
 
 # What the executable starts with. The package's own __main__ cannot be it: PyInstaller would take
 # the package's folder for the place to find modules in.
 ENTRY = "import sys\n\nfrom renpytester.cli import main\n\nsys.exit(main())\n"
 
 
-def version():
+def about():
+    """What the package says of itself: its version, author and address."""
     scope = {}
     exec((PACKAGE / "__init__.py").read_text(encoding="utf-8"), scope)
-    return scope["__version__"]
+    return scope
+
+
+def version():
+    return about()["__version__"]
+
+
+def version_info(file_name):
+    """What Windows shows under Details in the properties of the executable (DIST-002), in the
+    form PyInstaller reads it from."""
+    facts = about()
+    numbers = tuple(int(part) for part in (facts["__version__"].split(".") + ["0"] * 4)[:4])
+    texts = [
+        ("CompanyName", facts["__author__"]),
+        ("FileDescription", "RenPyTester"),
+        ("FileVersion", facts["__version__"]),
+        ("InternalName", NAME),
+        ("LegalCopyright", "Copyright (C) %s. Licensed under GPL-3.0. %s" % (facts["__author__"], facts["__url__"])),
+        ("OriginalFilename", file_name),
+        ("ProductName", "RenPyTester"),
+        ("ProductVersion", facts["__version__"]),
+        ("Comments", facts["__doc__"].strip()),
+    ]
+    strings = ", ".join("StringStruct(%r, %r)" % pair for pair in texts)
+    return (
+        "VSVersionInfo(ffi=FixedFileInfo(filevers=%r, prodvers=%r, mask=0x3f, flags=0x0, OS=0x40004, fileType=0x1, "
+        "subtype=0x0, date=(0, 0)), kids=[StringFileInfo([StringTable('040904B0', [%s])]), "
+        "VarFileInfo([VarStruct('Translation', [1033, 1200])])])\n" % (numbers, numbers, strings))
 
 
 def tag_of(number):
@@ -49,26 +82,33 @@ def data_files():
     return found
 
 
-def command(entry):
+def command(entry, name=NAME, windowed=False, version_file=None):
     cmd = [
-        sys.executable, "-m", "PyInstaller", "--onefile", "--console", "--name", NAME, "--noupx", "--clean",
-        "--noconfirm", "--distpath", str(DIST), "--workpath", str(BUILD / "pyinstaller"), "--specpath", str(BUILD),
-        "--paths", str(ROOT), "--icon", str(PACKAGE / "assets" / "icon.ico")]
-    if sys.platform == "win32":
-        # Started by a double click, the program is given a console window of its own, which it has
-        # no use for: it is hidden before anything is unpacked (CLI-007).
-        cmd += ["--hide-console", "hide-early"]
+        sys.executable, "-m", "PyInstaller", "--onefile", "--windowed" if windowed else "--console", "--name", name,
+        "--noupx", "--clean", "--noconfirm", "--distpath", str(DIST), "--workpath", str(BUILD / "pyinstaller"),
+        "--specpath", str(BUILD), "--paths", str(ROOT), "--icon", str(PACKAGE / "assets" / "icon.ico")]
+    if version_file is not None:
+        cmd += ["--version-file", str(version_file)]
     for file, folder in data_files():
         cmd += ["--add-data", "%s:%s" % (file, folder)]
     return cmd + [str(entry)]
 
 
 def build():
+    """Builds the executables for this system and returns them, the console program first."""
     BUILD.mkdir(exist_ok=True)
     entry = BUILD / (NAME + "_entry.py")
     entry.write_text(ENTRY, encoding="utf-8")
-    subprocess.run(command(entry), check=True, cwd=str(ROOT))
-    return DIST / (NAME + (".exe" if sys.platform == "win32" else ""))
+    if sys.platform != "win32":
+        subprocess.run(command(entry), check=True, cwd=str(ROOT))
+        return [DIST / NAME]
+    built = []
+    for name, windowed in ((NAME, False), (WINDOWED, True)):
+        details = BUILD / (name + "_version.txt")
+        details.write_text(version_info(name + ".exe"), encoding="utf-8")
+        subprocess.run(command(entry, name, windowed, details), check=True, cwd=str(ROOT))
+        built.append(DIST / (name + ".exe"))
+    return built
 
 
 def summarise(built):
@@ -76,11 +116,13 @@ def summarise(built):
     target = os.environ.get("GITHUB_STEP_SUMMARY")
     if not target:
         return
-    digest = hashlib.sha256(built.read_bytes()).hexdigest()
     with open(target, "a", encoding="utf-8") as page:
         page.write("### Executable built\n\n| File | Version | Size | SHA-256 |\n| --- | --- | --- | --- |\n")
-        page.write("| `%s` | %s | %.1f MB | `%s` |\n\n" % (
-            built.name, version(), built.stat().st_size / 1024 ** 2, digest))
+        for file in built:
+            digest = hashlib.sha256(file.read_bytes()).hexdigest()
+            page.write("| `%s` | %s | %.1f MB | `%s` |\n" % (
+                file.name, version(), file.stat().st_size / 1024 ** 2, digest))
+        page.write("\n")
 
 
 def main(argv):
@@ -95,7 +137,8 @@ def main(argv):
         print("Tag %s matches the version." % args.tag)
         return 0
     built = build()
-    print("Built %s" % built)
+    for file in built:
+        print("Built %s" % file)
     summarise(built)
     return 0
 

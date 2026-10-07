@@ -74,8 +74,59 @@ def test_executable_is_given_the_same_data_files_as_the_package(build_exe):
     entry = ROOT / "build" / "entry.py"
     command = build_exe.command(entry)
     assert "--onefile" in command and "--console" in command and command[-1] == str(entry)
-    assert ("--hide-console" in command) == (sys.platform == "win32")
     assert command.count("--add-data") == len(files)
+
+
+@pytest.mark.req("CLI-007", "DIST-002")
+def test_windows_gets_a_window_program_with_no_console_beside_the_console_program(build_exe):
+    entry = ROOT / "build" / "entry.py"
+    details = ROOT / "build" / "version.txt"
+    command = build_exe.command(entry, build_exe.WINDOWED, windowed=True, version_file=details)
+    assert "--windowed" in command and "--console" not in command
+    assert command[command.index("--name") + 1] == "renpytesterw"
+    assert command[command.index("--version-file") + 1] == str(details)
+    # Nothing hides a console any more: the window program never has one.
+    assert "--hide-console" not in command and "--hide-console" not in build_exe.command(entry)
+
+
+@pytest.mark.req("DIST-002")
+def test_executable_says_what_it_is_in_its_properties(build_exe):
+    text = build_exe.version_info("renpytesterw.exe")
+    numbers = tuple(int(part) for part in __version__.split(".")) + (0,)
+    assert "filevers=%r" % (numbers,) in text and "prodvers=%r" % (numbers,) in text
+    for name, value in (
+            ("ProductName", "RenPyTester"), ("FileDescription", "RenPyTester"), ("CompanyName", "CyBearNairus"),
+            ("FileVersion", __version__), ("ProductVersion", __version__), ("OriginalFilename", "renpytesterw.exe")):
+        assert "StringStruct(%r, %r)" % (name, value) in text, name
+    assert "GPL-3.0" in text and "https://github.com/CyBearNairus/RenPyTester" in text
+    # It is Python that PyInstaller can read, and nothing else.
+    compile(text, "version", "eval")
+
+
+@pytest.mark.req("CLI-007")
+def test_window_program_with_nowhere_to_write_is_told_apart_from_one_in_a_terminal(monkeypatch):
+    import io
+
+    # Output that goes somewhere already is left alone.
+    stream = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", stream)
+    monkeypatch.setattr(sys, "stderr", stream)
+    monkeypatch.setattr(cli, "no_terminal", False)
+    cli.find_console()
+    assert sys.stdout is stream and cli.no_terminal is False
+
+    # The window program started by a double click has no output at all, and no terminal to find.
+    monkeypatch.setattr(sys, "stdout", None)
+    monkeypatch.setattr(sys, "stderr", None)
+    monkeypatch.setattr(sys, "platform", "linux")  # Nowhere to look for a terminal, as after a double click.
+    cli.find_console()
+    assert cli.no_terminal is True
+    sys.stdout.write("goes nowhere, and does not fail")
+    sys.stdout.close()
+    sys.stderr.close()
+    monkeypatch.setattr(sys, "platform", "win32")
+    # So a folder dropped on it opens the window with that game.
+    assert cli.own_console() is True
 
 
 @pytest.mark.req("DIST-005")

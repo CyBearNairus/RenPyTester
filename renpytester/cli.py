@@ -1,6 +1,7 @@
 """Command line (spec 4.10)."""
 
 import argparse
+import os
 import sys
 import traceback
 from pathlib import Path
@@ -157,6 +158,41 @@ def info(argv, language_given):
     return EXIT_OK
 
 
+# Set when this is the window program, with no console of its own, and no terminal started it:
+# it was opened by a double click, or by dropping something on it (CLI-007).
+no_terminal = False
+
+
+def find_console():
+    """Gives the window program somewhere to write, when it has nowhere (CLI-007).
+
+    On Windows the executable that a double click opens is a window program: it has no console,
+    and so no window of one ever appears. Started from a terminal it writes to that terminal, as
+    far as it can: the terminal does not wait for a window program, which is what the console
+    program is for. Started with its output going to a file or to another program, it has that
+    to write to already and nothing is done here.
+    """
+    global no_terminal
+    if sys.stdout is not None and sys.stderr is not None:
+        return
+    attached = False
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            attached = bool(ctypes.windll.kernel32.AttachConsole(-1))  # The console of whoever started it.
+        except Exception:
+            attached = False
+    no_terminal = not attached
+    for name in ("stdout", "stderr"):
+        if getattr(sys, name) is None:
+            try:
+                stream = open("CONOUT$" if attached else os.devnull, "w", encoding="utf-8", errors="replace")
+            except OSError:
+                stream = open(os.devnull, "w", encoding="utf-8")
+            setattr(sys, name, stream)
+
+
 def console_is_ours(processes, frozen, to_console):
     """Whether a console with this many processes in it belongs to this program alone, and shows its output.
 
@@ -171,6 +207,8 @@ def own_console():
     gets when it is started by a double click, or by dropping something on it, and not from a terminal."""
     if sys.platform != "win32":
         return False
+    if no_terminal:
+        return True  # The window program, started by nobody's terminal.
     try:
         import ctypes
 
@@ -242,6 +280,7 @@ def cache(argv):
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     launcher.leave_bundle()
+    find_console()
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             # Piped output (CI logs, other programs) is UTF-8; a real console keeps its own encoding.

@@ -7,7 +7,7 @@ Runnable from source with plain Python or as a single-file executable, from a te
 
 **Milestones M0 (spikes), M1 (walking skeleton), M2 (lint stage), M3a (exploration), M3b (checks that need no rendering), M3c (getting past minigames), M3d (label runs), M3e (parallel processes) and M4 (translations) are done.**
 **M5 (reports and config), M6 (sandbox), M7 (graphical interface), M8 (packaging) and M9 (hardening) are done too: every milestone of the spec is built.**
-[docs/SPEC.md](docs/SPEC.md) version 0.24 is approved; the version 0.25 amendments, from building M9, wait for the owner (decision D28).
+[docs/SPEC.md](docs/SPEC.md) version 0.27 is approved, and nothing in it is waiting for the owner.
 What the spec still lists and nobody has built are SHOULD and COULD rows only; `tests/unit/test_project.py` fails when a MUST requirement is named by no test.
 What works today: `python -m renpytester GAME` finds the game and its engine and explores every choice of every menu with no window, using in-memory snapshots, and carries on after a crash or a hang.
 While playing it checks for undefined images, missing image, audio and movie files, broken text tags and menus with nothing to choose.
@@ -31,9 +31,10 @@ A game whose own script writes into its folder is told so in the report.
 `python -m renpytester` with nothing after it, or `renpytester gui [GAME]`, opens a window that makes the same runs: choose the game, run or cancel, and read the result and the findings there.
 What to check, the languages, the sandbox and the report folder are *advanced settings*, one click away.
 The window has the program's own icon, lists its languages by name, and has an *About* dialog with the version, the author and the repository.
-`python tools/build_exe.py` makes the single-file executable, `dist/renpytester.exe` on Windows, which is the same program with Python inside it.
+`python tools/build_exe.py` makes the single-file executable, which is the same program with Python inside it.
+On Windows it makes two: `dist/renpytesterw.exe`, a window program for a double click, and `dist/renpytester.exe`, a console program for terminals.
 Pushing a tag such as `v0.1.0` has GitHub build it, test it and attach it to a release.
-v0.1.1 was released that way with all four executables: Windows, Linux, macOS Apple Silicon and macOS Intel.
+v0.1.1 was released that way with all four executables: Windows, Linux, macOS Apple Silicon and macOS Intel; from v0.1.2 Windows has two.
 Before tagging, start the same workflow by hand as a rehearsal: an executable that fails its tests is left out of the release without stopping it.
 If a job of the tag's own run fails on a test that depends on timing, `gh run rerun RUN --failed` runs it again for the same tag.
 Engine facts and hooks are recorded in [docs/SPIKES.md](docs/SPIKES.md): read it before touching the harness.
@@ -163,9 +164,17 @@ The ones that cause real damage if forgotten:
 - **The executable must not pass its own libraries on to the engine.**
   `launcher.leave_bundle`, called first thing by `cli.main`, takes the folder the executable unpacked itself into out of the search for libraries.
   Anything new that starts another program is covered by it; do not undo it.
-- **The executable is a console program whose console is hidden on a double click.**
-  It has to be a console program for a terminal to wait for it and get its exit code.
-  Started by a double click it is two processes in a console of their own, which is how `cli.own_console` knows; a process whose output is not a console is never taken for a double click.
+- **On Windows there are two executables, because one program cannot be both kinds.**
+  A console program started by a double click is given a console window before any of its code runs; hiding it afterwards still shows it for a moment, and does not work at all where Windows Terminal is the default.
+  A window program never has one, but no terminal waits for it or gets its exit code.
+  So `renpytesterw.exe` (released as `renpytester-windows-x64.exe`) is a window program, and `renpytester.exe` (released as `renpytester-windows-x64-console.exe`) is a console program.
+  Never add `--hide-console` again, and never make the one build serve both.
+- **The window program starts with nothing to write to.**
+  `sys.stdout` and `sys.stderr` are `None` there; `cli.find_console`, called first thing by `cli.main` after `leave_bundle`, gives it its starter's terminal or nothing at all, and notes when there was no terminal.
+  Anything that runs before it must not print.
+  The console program started by a double click is two processes in a console of their own, which is how `cli.own_console` knows; a process whose output is not a console is never taken for a double click.
+- **What Windows shows in the executable's properties comes from `renpytester/__init__.py`**, through `build_exe.version_info`.
+  Do not write a version or a name into the build tool.
 - **Options have no defaults in the command-line parser.**
   An option that was not given must stay `None`, so that the config file can supply it; the defaults live in `runner.Options` only, and `runner.build_options` puts the three together.
   Give a new option a default in `argparse` and the config file silently stops working for it.
@@ -219,6 +228,7 @@ Paths to these come from environment variables.
 - Linters: `python -m flake8 .`, `python tools/lint_rpy.py`, `npx markdownlint-cli2 "**/*.md"`.
 - Run a spike: `python spikes/run.py s4_screens.rpy --game tutorial`.
 - Build the executable: `python tools/build_exe.py`, with PyInstaller installed (`.cache/venv-build` has it).
+  On Windows the whole suite is run against `dist/renpytester.exe`, and `tests/e2e/test_executable.py` against `dist/renpytesterw.exe` as well.
 - Tests against the executable: set `RENPYTESTER_EXE` to `dist/renpytester.exe` and run `python -m pytest tests/e2e`, with a Python that has PyInstaller, on both SDKs.
   Build again first: the executable holds the code as it was when it was built.
   Tests marked `source` are skipped then, because they reach into the program itself.
@@ -240,3 +250,8 @@ Paths to these come from environment variables.
   A cache is only of use to later runs when a run on `main` saved it, which is why CI does.
   Each job writes what it did to the run's summary page: `tests/conftest.py` does that for every pytest run, `tools/build_exe.py` for the build.
 - `docs/report-schema.md`: the JSON report format. Update it with any change to `model.py`.
+- `README.md` is for someone's first run and nothing more: getting the program, testing a game with the window or with one command, and reading the result.
+  Every other feature is described in `docs/advanced.md`; a new option or feature goes there, not in the README.
+- `docs/images/`: the pictures in the README, of the window and of the HTML report after testing The Question.
+  They are made by running the real program, never drawn; make them again when the window or the report changes how it looks.
+  The one thing changed in them is the folders shown, which are made-up ones under `C:\Games` (owner's instruction, 2026-10-07): a picture must not show the folders of the computer it was taken on.

@@ -1,149 +1,96 @@
 # RenPyTester
 
-Test all routes on a RenPy game to ensure it's working properly.
+RenPyTester plays through a Ren'Py game by itself and tells you what is broken: crashes, missing pictures and sounds, broken translations and broken menu screens, each with the file and line where it happened.
 
-RenPyTester plays through a Ren'Py game by itself, with no window on screen, and reports crashes and script errors with the file and line where they happened.
-It also runs Ren'Py's own lint, so problems in scenes the playthrough did not reach, such as a missing image or a jump to a label that does not exist, are reported too.
-It works on any Ren'Py 8 game, built or in development, and leaves the game folder exactly as it found it.
+You give it the folder of a game; it does the rest.
+No window of the game appears while it works, and the game's folder is left exactly as it was.
+It works on any Ren'Py 8 game, finished or still being made.
 
-It tries every choice of every menu, and tells you how much of the script it played and which labels it never reached.
+![The RenPyTester window after testing The Question](docs/images/window.png)
 
-If the game has translations, each language is checked too.
-You are told which lines of dialogue and which other texts have no translation yet, with the file and line of each.
-You are also told about translations with a broken text tag, translations that show different `[variables]` from the original, and languages the game cannot be switched to.
-As the story is played, every translation of each line is tried out in the state the game is really in, so a translation that uses a variable the game does not have is found without playing the game again in each language.
+## 1. Get it
 
-The menu screens are checked as well, since playing the story never opens them: the main menu, preferences, save, load, history, about, help and the yes-or-no question.
-Each one the game has is put together the way the engine does before showing it, in every language, and you are told about one that fails, one with a broken text tag, and one that shows a picture whose file is missing.
+Pick one of the two ways.
 
-This is an early version.
+### The simple way: download the program
 
-## Getting it
+Go to the [latest release](https://github.com/CyBearNairus/RenPyTester/releases/latest) and download the file for your system.
+Nothing has to be installed, not even Python.
 
-The simplest way is the single program on the [releases page](https://github.com/CyBearNairus/RenPyTester/releases/latest): `renpytester-windows-x64.exe` for Windows.
-It needs no Python and no installation.
-Double-click it to open the window, or drop a game's folder on it to open the window with that game chosen.
-In a terminal it takes everything described below: write its name where the examples say `python -m renpytester`.
-The first time, Windows may warn that the program is from an unknown publisher, because it is not signed; choose *More info*, then *Run anyway*.
+| Your system | File to download |
+| --- | --- |
+| Windows | `renpytester-windows-x64.exe` |
+| Linux | `renpytester-linux-x64` |
+| macOS, Apple Silicon (M1 and later) | `renpytester-macos-arm64` |
+| macOS, Intel | `renpytester-macos-x64` |
 
-When they could be built, the same page has programs for Linux (`renpytester-linux-x64`) and macOS (`renpytester-macos-arm64` for Apple Silicon, `renpytester-macos-x64` for Intel).
-After downloading one of those, allow it to run with `chmod +x`.
+On Windows, the first time you open it you may be told that the program is from an unknown publisher, because it is not signed: choose *More info*, then *Run anyway*.
+On Linux and macOS, allow the file to run first: `chmod +x` followed by the file's name.
 
-To run from the source instead, you need Python 3.11 or later and a copy of this repository.
-Nothing else has to be installed.
-`pipx install .` or `uv tool install .` in that copy gives you a `renpytester` command.
+### From the source
 
-## Usage
+You need [Python](https://www.python.org/downloads/) 3.11 or later, and nothing else.
+Download this repository (the green *Code* button, then *Download ZIP*, and unpack it), or clone it:
 
-### In a window
+```text
+git clone https://github.com/CyBearNairus/RenPyTester.git
+cd RenPyTester
+```
+
+## 2. Test your game
+
+### With the window
+
+Double-click the program you downloaded.
+From the source, open a terminal in the repository's folder and type:
 
 ```text
 python -m renpytester
 ```
 
-A window opens.
-Choose the game's folder and press *Run*.
-*Show advanced settings* lets you choose what is checked, which languages, whether to test a copy of the game, and where the reports are saved.
-The window shows the progress, then whether the game passed, the problems found with their file and line, and a button that opens the full report.
-*Cancel* stops a run and puts the game folder back as it was.
-The window also shows the command that makes the same run from a terminal, to copy into a script or a build server.
-Its reports are saved in a folder named `renpytester-report` in your home folder, unless you choose another among the advanced settings.
+Then:
 
-`python -m renpytester gui PATH_TO_GAME` opens the window with that game already chosen.
-On some Linux systems Python comes without the part that draws windows; RenPyTester then tells you which package to install, and everything below still works.
+1. Press *Browse...* and choose your game's folder.
+2. If the game is a project that you open with the Ren'Py launcher, you are also asked for the folder of your Ren'Py SDK. A game built for players has its own engine and needs nothing more.
+3. Press *Run* and wait for the bar to fill.
 
-### In a terminal
+The window then says whether the game passed and lists what was found.
+*Open the report* shows everything in your browser.
+
+### With one command
+
+To start a test without the window, give the game's folder, shown here as `PATH_TO_GAME`:
 
 ```text
 python -m renpytester PATH_TO_GAME
 ```
 
-`PATH_TO_GAME` is the game's folder, or any file inside it.
-A game that ships its own engine needs nothing more.
-For a project that lives in the Ren'Py launcher's projects folder, add the SDK:
+For a project that you open with the Ren'Py launcher, add the SDK:
 
 ```text
 python -m renpytester PATH_TO_GAME --sdk PATH_TO_RENPY_SDK
 ```
 
-The result is printed and also saved in the `renpytester-report` folder, in files named after the game and the time of the run, such as `report-the-question-2026-10-06-143005.html`.
-Earlier reports are never overwritten.
-Three files are written each time:
+With a downloaded program, write its name in place of `python -m renpytester`.
+On Windows that is `renpytester-windows-x64-console.exe`, a second file on the release page made for terminals and build servers.
 
-- `.html`: the report to read. Open it in any browser; it needs no internet connection.
-- `.json`: everything the run found, for other programs. Its format is described in [docs/report-schema.md](docs/report-schema.md).
-- `.xml`: a JUnit report, which CI systems show as test results.
+## 3. Read the result
 
-The exit code is 0 when no errors were found, 1 when errors were found, 2 when an option or the settings file is wrong, and 3 when the game could not be tested or the run did not finish.
-If you stop a run with Ctrl+C, the game folder is restored and a report of what was found until then is still written.
+Every run saves a report that opens in any browser, with no internet connection needed.
+The window and the terminal both say where it was saved.
 
-To check only some of the game's languages, name them: `--languages french,spanish`.
-To see only problems that an earlier run did not have, give that run's JSON report: `--baseline OLD_REPORT.json`.
-To see what a game is without playing it, run `python -m renpytester info PATH_TO_GAME`.
+![The report of The Question, opened in a browser](docs/images/report.png)
 
-Messages are in English or Brazilian Portuguese, following your system; use `--lang en` or `--lang pt-BR` to choose.
-Run `python -m renpytester --help` for all options.
+- **Errors** are things that are broken, such as a crash or a missing file. A game with errors has *failed*.
+- **Warnings** are things worth a look, such as a line with no translation.
+- **Notes** are for your information.
+- **Possible issues** were found in a part of the game the tool had to reach in an unusual way, so a player may never meet them.
 
-## Games that write their own files
+Click a problem in the report to see how to get to it in the game: the choices that were made on the way.
 
-RenPyTester puts back everything that it and the engine write into the game folder.
-It cannot do that for files the game's own script changes or deletes there, such as a data file the game rewrites.
-When a game does that, the report says so and names the files.
+## More
 
-For such a game, add `--sandbox`:
+Everything else is in [docs/advanced.md](docs/advanced.md): all the options, choosing what is checked and in which languages, the settings file, testing a copy of a game that writes its own files, use on a build server, and the exit codes.
+The format of the JSON report is in [docs/report-schema.md](docs/report-schema.md).
 
-```text
-python -m renpytester PATH_TO_GAME --sandbox
-```
-
-A copy of the game is then tested, and the game itself is only read.
-The copy is kept, so only the first run has to copy everything; later runs copy just the files that changed.
-If file dates on your disk cannot be trusted, `--sandbox-verify` compares the contents of every file, which is slower.
-
-The copies are kept in your user profile.
-`python -m renpytester cache list` shows where, and how much space each takes.
-`python -m renpytester cache clear` deletes them all, and `python -m renpytester cache clear PATH_TO_GAME` deletes the copy of one game.
-
-## Settings file
-
-Settings can be kept in a file named `renpytester.toml` in the game's folder, beside the `game` folder, so that every run uses them.
-The file is optional, and so is everything in it.
-An option given on the command line wins over the file, and `--config FILE` uses another file in its place.
-A setting the tool does not know is reported as a mistake, never skipped.
-
-```toml
-# Any option, by its name with underscores.
-# The checks are lint, routes, translations and screens; all four are made unless you say otherwise.
-stages = ["lint", "routes"]
-max_time = 300
-fail_on = "warning"
-lang = "pt-BR"
-
-# Labels that are not to be played, such as a minigame.
-# A call to one returns at once, and a jump to one ends the story there.
-exclude_labels = ["pong_game", "debug_*"]
-
-# How serious a kind of problem is to you.
-[severity]
-untranslated = "error"
-
-# What to type at a particular prompt. Other prompts get --input-value.
-[inputs]
-"What is the door code?" = "4721"
-
-# Values that variables of the game have when the story starts.
-[variables]
-tickets = 2
-
-# Problems you do not want listed. They are still counted.
-# A problem is left out when it matches every part of a rule.
-[[ignore]]
-class = "untranslated"
-language = "french"
-
-[[ignore]]
-file = "game/old/*.rpy"
-message = "is not defined"
-```
-
-The parts of an ignore rule are `class` (the kind of problem, as the JSON report names it), `file` and `label` (patterns with `*`), `language`, and `message` (a regular expression looked for in the problem's message).
+RenPyTester is free software under the [GPL-3.0 licence](LICENSE).
