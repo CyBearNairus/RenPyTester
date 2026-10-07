@@ -7,7 +7,7 @@ Runnable from source with plain Python or as a single-file executable, from a te
 
 **Milestones M0 (spikes), M1 (walking skeleton), M2 (lint stage), M3a (exploration), M3b (checks that need no rendering), M3c (getting past minigames), M3d (label runs), M3e (parallel processes) and M4 (translations) are done.**
 **M5 (reports and config), M6 (sandbox), M7 (graphical interface) and M8 (packaging) are done too. M9 (hardening) is next.**
-[docs/SPEC.md](docs/SPEC.md) version 0.21 is approved; the 0.22 amendments that came out of building M8 are waiting for the owner's approval (decision D26 in spec section 9.2).
+[docs/SPEC.md](docs/SPEC.md) version 0.24 is approved, and nothing in it is waiting for the owner.
 What works today: `python -m renpytester GAME` finds the game and its engine and explores every choice of every menu with no window, using in-memory snapshots, and carries on after a crash or a hang.
 While playing it checks for undefined images, missing image, audio and movie files, broken text tags and menus with nothing to choose.
 It also runs the engine's lint and turns its report into findings, merged with what playing found.

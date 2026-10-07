@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Version 0.21 **approved** by the project owner on 2026-10-06. Version 0.22 amendments (from building M8) await approval. Version 0.23 adds a requirement the owner asked for. |
+| Status | Version 0.24 **approved** by the project owner on 2026-10-07. |
 | Last updated | 2026-10-07 |
 
 This document is the source of truth for what RenPyTester does.
@@ -500,15 +500,14 @@ Still unverified, and the requirements that depend on them:
 
 Open:
 
-| # | Question | Recommendation |
-| --- | --- | --- |
-| D26 | Approve the version 0.22 amendments: CLI-007 and DIST-002 to DIST-006 made precise. In particular: the executable is one console program for both the terminal and the window, with its console hidden on a double click; a program whose output is read by another program never opens the window; and the Linux and macOS executables do not hold back a release when they fail. | Approve. |
+None.
 
 Settled on 2026-10-06:
 
 | # | Decision |
 | --- | --- |
 | D21 | Version 0.17 to 0.21 amendments approved (the owner approved the spec and asked for M8). |
+| D26 | Version 0.22 amendments approved on 2026-10-07: CLI-007 and DIST-002 to DIST-006 made precise. The executable is one console program for the terminal and the window; a program whose output another program reads never opens the window; and the Linux and macOS executables do not hold back a release. |
 | D27 | Asked for by the owner on 2026-10-07: game processes start one at a time, so that a game which writes its own files as it starts is loaded whole by each (RUN-027). Found by the first release run, where the Tutorial lost a label on Linux. |
 | D25 | Asked for by the owner: among the advanced settings the languages come first, the sandbox has a label, and the button for its copies sits under it (GUI-016, GUI-010). The SDK folder stays in plain sight for a game that needs one. |
 | D24 | Asked for by the owner: the window shows only the game at first, with the other choices behind *Show advanced settings* (GUI-016); the report folder can be chosen (GUI-011); and dialogs open centred, without a flash (GUI-017). |
@@ -564,3 +563,4 @@ Settled on 2026-10-06:
 | 2026-10-06 | 0.21 | Owner's requests (D25): GUI-016 gives the order of the advanced settings, languages first; GUI-010 puts the button for the sandbox's copies under the sandbox option. |
 | 2026-10-06 | 0.22 | M8 built. D21 settled (0.17 to 0.21 approved). CLI-007 and DIST-002 to DIST-006 made precise: how the executable is built, named, tested and released, and how it tells a double click from a terminal. Two assumptions added to 9.1. |
 | 2026-10-07 | 0.23 | Owner's request (D27): added RUN-027 (game processes start one at a time). DIST-005 allows a rehearsal started by hand. Section 9.1 brought up to date with the first release run. |
+| 2026-10-07 | 0.24 | D26 settled (0.22 approved). Nothing is waiting for approval. |
