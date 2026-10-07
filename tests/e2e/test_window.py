@@ -14,7 +14,7 @@ import pytest
 from renpytester import cli, gui, i18n, runner, sandbox
 from tests.conftest import folder_digest
 
-pytestmark = pytest.mark.e2e
+pytestmark = [pytest.mark.e2e, pytest.mark.source]
 
 # What the status line is about while the story is played: the stage, then, once the game has
 # reported in, how far it has got. Which of the two is showing at a given moment depends on timing.

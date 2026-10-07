@@ -11,6 +11,35 @@ from pathlib import Path
 SILENT_EDITOR = Path(__file__).resolve().parent / "harness" / "silent_editor.py"
 
 
+def frozen():
+    """True when this is the single-file executable and not Python running the source (DIST-002)."""
+    return bool(getattr(sys, "frozen", False))
+
+
+def leave_bundle(environ=None):
+    """Stops the single-file executable's own libraries from reaching the programs it starts (DIST-006).
+
+    To find the libraries it carries, the executable puts the folder it unpacked them into first in
+    the search for libraries, and what it starts inherits that: the game's engine would be given the
+    executable's libraries in place of its own. Run from source, there is nothing to undo.
+    """
+    if not frozen():
+        return
+    environ = os.environ if environ is None else environ
+    if sys.platform == "win32":
+        import ctypes
+
+        ctypes.windll.kernel32.SetDllDirectoryW(None)
+    elif sys.platform.startswith("linux"):
+        # The executable keeps what the user had here under another name. Libraries this program
+        # still has to load are not affected: the search path was read when the process started.
+        original = environ.pop("LD_LIBRARY_PATH_ORIG", None)
+        if original is None:
+            environ.pop("LD_LIBRARY_PATH", None)
+        else:
+            environ["LD_LIBRARY_PATH"] = original
+
+
 @dataclass
 class EngineRun:
     events: list = field(default_factory=list)

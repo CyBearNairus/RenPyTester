@@ -1002,6 +1002,7 @@ def test_every_run_writes_json_junit_and_html_reports(run, tmp_path):
     assert 'data-severity="error" data-stage="routes"' in page
 
 
+@pytest.mark.source
 @pytest.mark.req("CLI-006", "SAFE-002", "NFR-002")
 def test_stopping_a_run_restores_the_game_and_still_writes_what_was_found(run, monkeypatch):
     from renpytester.report.console import Console

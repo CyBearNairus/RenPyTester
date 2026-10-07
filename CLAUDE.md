@@ -6,8 +6,8 @@ Runnable from source with plain Python or as a single-file executable, from a te
 ## Current state
 
 **Milestones M0 (spikes), M1 (walking skeleton), M2 (lint stage), M3a (exploration), M3b (checks that need no rendering), M3c (getting past minigames), M3d (label runs), M3e (parallel processes) and M4 (translations) are done.**
-**M5 (reports and config), M6 (sandbox) and M7 (graphical interface) are done too. M8 (packaging) is next.**
-[docs/SPEC.md](docs/SPEC.md) version 0.16 is approved; the 0.17 amendments that came out of building M7 are waiting for the owner's approval (decision D21 in spec section 9.2).
+**M5 (reports and config), M6 (sandbox), M7 (graphical interface) and M8 (packaging) are done too. M9 (hardening) is next.**
+[docs/SPEC.md](docs/SPEC.md) version 0.21 is approved; the 0.22 amendments that came out of building M8 are waiting for the owner's approval (decision D26 in spec section 9.2).
 What works today: `python -m renpytester GAME` finds the game and its engine and explores every choice of every menu with no window, using in-memory snapshots, and carries on after a crash or a hang.
 While playing it checks for undefined images, missing image, audio and movie files, broken text tags and menus with nothing to choose.
 It also runs the engine's lint and turns its report into findings, merged with what playing found.
@@ -27,7 +27,8 @@ A game whose own script writes into its folder is told so in the report.
 `python -m renpytester` with nothing after it, or `renpytester gui [GAME]`, opens a window that makes the same runs: choose the game, run or cancel, and read the result and the findings there.
 What to check, the languages, the sandbox and the report folder are *advanced settings*, one click away.
 The window has the program's own icon, lists its languages by name, and has an *About* dialog with the version, the author and the repository.
-Not built yet: packaging (M8).
+`python tools/build_exe.py` makes the single-file executable, `dist/renpytester.exe` on Windows, which is the same program with Python inside it.
+Pushing a tag such as `v0.1.0` has GitHub build it, test it and attach it to a release; that workflow has not run yet, and the Linux and macOS executables have never been built.
 Engine facts and hooks are recorded in [docs/SPIKES.md](docs/SPIKES.md): read it before touching the harness.
 `spikes/` holds the throwaway M0 experiments; never import from it.
 
@@ -133,6 +134,16 @@ The ones that cause real damage if forgotten:
 - **Tests never touch the real cache.**
   `tests/conftest.py` points `RENPYTESTER_CACHE` at a temporary folder for every test; anything new that uses the cache must go through `sandbox.cache_dir()`.
 - **Never report "passed" for something that was not checked.** Skipped is skipped.
+- **The executable is the same program, and nothing in the code may assume it is run from source.**
+  Files the program reads are found beside the module that reads them (`Path(__file__)`), which holds in the executable because `tools/build_exe.py` puts them in the same places.
+  A new data file must be listed under `package-data` in `pyproject.toml`: the package and the executable both take their files from that list, and a test fails when a file is missing from it.
+  Never start the program itself again with `sys.executable`: in the executable that is not Python.
+- **The executable must not pass its own libraries on to the engine.**
+  `launcher.leave_bundle`, called first thing by `cli.main`, takes the folder the executable unpacked itself into out of the search for libraries.
+  Anything new that starts another program is covered by it; do not undo it.
+- **The executable is a console program whose console is hidden on a double click.**
+  It has to be a console program for a terminal to wait for it and get its exit code.
+  Started by a double click it is two processes in a console of their own, which is how `cli.own_console` knows; a process whose output is not a console is never taken for a double click.
 - **Options have no defaults in the command-line parser.**
   An option that was not given must stay `None`, so that the config file can supply it; the defaults live in `runner.Options` only, and `runner.build_options` puts the three together.
   Give a new option a default in `argparse` and the config file silently stops working for it.
@@ -182,6 +193,11 @@ Paths to these come from environment variables.
   Do this for every harness change.
 - Linters: `python -m flake8 .`, `python tools/lint_rpy.py`, `npx markdownlint-cli2 "**/*.md"`.
 - Run a spike: `python spikes/run.py s4_screens.rpy --game tutorial`.
+- Build the executable: `python tools/build_exe.py`, with PyInstaller installed (`.cache/venv-build` has it).
+- Tests against the executable: set `RENPYTESTER_EXE` to `dist/renpytester.exe` and run `python -m pytest tests/e2e`, with a Python that has PyInstaller, on both SDKs.
+  Build again first: the executable holds the code as it was when it was built.
+  Tests marked `source` are skipped then, because they reach into the program itself.
+- Release: set `__version__`, commit, and push the tag `v` plus that version; `.github/workflows/release.yml` does the rest.
 
 ## Layout
 
@@ -192,4 +208,6 @@ Paths to these come from environment variables.
   The JUnit and HTML writers take the JSON report's data, never the `Report` object: what is not in the JSON cannot be in them.
 - `renpytester/harness/zzz_renpytester_harness.rpy`: the script injected into the game.
 - `tests/fixtures/games/`: one small game per behaviour under test. A new finding class needs a new fixture.
+- `tools/`: development tools. `build_exe.py` builds the executable, `make_icon.py` draws the icon, `lint_rpy.py` lints Ren'Py scripts.
+- `.github/workflows/`: `ci.yml` runs the linters and unit tests on every push; `release.yml` builds and publishes the executables from a tag.
 - `docs/report-schema.md`: the JSON report format. Update it with any change to `model.py`.

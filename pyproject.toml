@@ -12,7 +12,7 @@ dependencies = []
 dynamic = ["version"]
 
 [project.optional-dependencies]
-dev = ["pytest", "flake8", "pillow"]
+dev = ["pytest", "flake8", "pillow", "pyinstaller"]
 
 [project.scripts]
 renpytester = "renpytester.cli:main"
@@ -31,4 +31,5 @@ testpaths = ["tests"]
 markers = [
     "req(*ids): the specification requirement IDs this test verifies (docs/SPEC.md section 7.3)",
     "e2e: runs a real Ren'Py engine; needs an SDK (RENPY_SDK or .cache/sdk)",
+    "source: reaches into the program itself, so it is skipped when the executable is tested (RENPYTESTER_EXE)",
 ]

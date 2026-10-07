@@ -14,12 +14,23 @@ You are also told about translations with a broken text tag, translations that s
 As the story is played, every translation of each line is tried out in the state the game is really in, so a translation that uses a variable the game does not have is found without playing the game again in each language.
 
 This is an early version.
-A single-file executable, which needs no Python, is planned; see [docs/SPEC.md](docs/SPEC.md).
+
+## Getting it
+
+The simplest way is the single program on the [releases page](https://github.com/CyBearNairus/RenPyTester/releases/latest): `renpytester-windows-x64.exe` for Windows.
+It needs no Python and no installation.
+Double-click it to open the window, or drop a game's folder on it to open the window with that game chosen.
+In a terminal it takes everything described below: write its name where the examples say `python -m renpytester`.
+The first time, Windows may warn that the program is from an unknown publisher, because it is not signed; choose *More info*, then *Run anyway*.
+
+When they could be built, the same page has programs for Linux (`renpytester-linux-x64`) and macOS (`renpytester-macos-arm64` for Apple Silicon, `renpytester-macos-x64` for Intel).
+After downloading one of those, allow it to run with `chmod +x`.
+
+To run from the source instead, you need Python 3.11 or later and a copy of this repository.
+Nothing else has to be installed.
+`pipx install .` or `uv tool install .` in that copy gives you a `renpytester` command.
 
 ## Usage
-
-You need Python 3.11 or later.
-Nothing else has to be installed.
 
 ### In a window
 

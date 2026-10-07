@@ -5,7 +5,7 @@ import sys
 import traceback
 from pathlib import Path
 
-from renpytester import __version__, config, discovery, i18n, report, runner, sandbox
+from renpytester import __version__, config, discovery, i18n, launcher, report, runner, sandbox
 from renpytester.errors import ToolError
 from renpytester.i18n import t
 from renpytester.model import ERROR, SEVERITIES
@@ -157,6 +157,15 @@ def info(argv, language_given):
     return EXIT_OK
 
 
+def console_is_ours(processes, frozen, to_console):
+    """Whether a console with this many processes in it belongs to this program alone, and shows its output.
+
+    The single-file executable is two processes, the one that unpacks it and the one that runs. A
+    program whose output goes to a file or to another program was started by one, not by a person.
+    """
+    return to_console and processes == (2 if frozen else 1)
+
+
 def own_console():
     """True when this process has a console window all to itself. On Windows that is what a program
     gets when it is started by a double click, or by dropping something on it, and not from a terminal."""
@@ -166,7 +175,8 @@ def own_console():
         import ctypes
 
         processes = (ctypes.c_uint * 4)()
-        return ctypes.windll.kernel32.GetConsoleProcessList(processes, 4) == 1
+        count = ctypes.windll.kernel32.GetConsoleProcessList(processes, 4)
+        return console_is_ours(count, launcher.frozen(), sys.stdout.isatty())
     except Exception:
         return False
 
@@ -231,6 +241,7 @@ def cache(argv):
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
+    launcher.leave_bundle()
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             # Piped output (CI logs, other programs) is UTF-8; a real console keeps its own encoding.

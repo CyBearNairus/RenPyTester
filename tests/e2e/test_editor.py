@@ -7,7 +7,7 @@ import pytest
 from renpytester import discovery
 from renpytester.launcher import build_environment
 
-pytestmark = pytest.mark.e2e
+pytestmark = [pytest.mark.e2e, pytest.mark.source]
 
 RECORDING_EDITOR = '''
 class Editor(object):

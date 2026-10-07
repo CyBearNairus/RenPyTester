@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Version 0.16 **approved** by the project owner on 2026-10-06. Version 0.17 amendments (from building M7) await approval. Versions 0.18 to 0.21 add requirements the owner asked for. |
+| Status | Version 0.21 **approved** by the project owner on 2026-10-06. Version 0.22 amendments (from building M8) await approval. |
 | Last updated | 2026-10-06 |
 
 This document is the source of truth for what RenPyTester does.
@@ -298,7 +298,7 @@ Translation testing MUST NOT multiply run time by the number of languages: check
 | CLI-004 | MUST | `--fail-on error\|warning\|info\|never` sets the threshold (default `error`). |
 | CLI-005 | MUST | `--help` documents every option with its default; `--version` prints the version. |
 | CLI-006 | MUST | Ctrl+C stops the game, cleans up (SAFE-002), and still writes a partial report marked incomplete. The report is written in every format, has what was found until then, and gives each stage that had not finished the status `interrupted`. The exit code is 3, as for any run that is not complete. |
-| CLI-007 | MUST | Launched with no arguments (for example by double-click), the executable opens the graphical interface (4.14). Dragging a game folder onto the executable opens the graphical interface with that game already selected. `renpytester gui [GAME]` does the same from a terminal. `renpytester gui` takes `--lang`. A dropped folder is told from a game named in a terminal by where the program was started: the folder is the only argument, and the program has a console window to itself, which is what Windows gives a program started by a double click or a drop. Anything typed into a terminal with a game after it is a run in the terminal (CLI-001). How this works for a packaged executable is settled with M8. |
+| CLI-007 | MUST | Launched with no arguments (for example by double-click), the executable opens the graphical interface (4.14). Dragging a game folder onto the executable opens the graphical interface with that game already selected. `renpytester gui [GAME]` does the same from a terminal. `renpytester gui` takes `--lang`. A dropped folder is told from a game named in a terminal by where the program was started: the folder is the only argument, and the program has a console window to itself, which is what Windows gives a program started by a double click or a drop. Anything typed into a terminal with a game after it is a run in the terminal (CLI-001). So is a program whose output another program reads, such as a build server's, even when it has a console to itself. The single-file executable (DIST-002) is a console program, so that a terminal waits for it and gets its output and exit code; it tells a double click or a drop in the same way, counting itself as the two processes it is made of. The console window Windows gives it for a double click or a drop is hidden as the program starts, before it unpacks anything, and a console that it shares with a terminal is never hidden. |
 | CLI-008 | SHOULD | `renpytester info GAME` prints what GAME-006 detects and exits, without running the game's story. It writes no report. When the game cannot start, it says why and exits with code 1. |
 | CLI-009 | — | *Withdrawn in 0.2.* Replaced by section 4.14. |
 | CLI-010 | MUST | `--lang en\|pt-BR` selects the interface language (4.15). |
@@ -333,11 +333,11 @@ Translation testing MUST NOT multiply run time by the number of languages: check
 | ID | Pri | Requirement |
 | --- | --- | --- |
 | DIST-001 | MUST | Run from a clone with no install step beyond having Python: `python -m renpytester GAME`. |
-| DIST-002 | MUST | Single-file executable for Windows, with the harness and the graphical interface embedded. No installer, no Python needed. |
-| DIST-003 | SHOULD | Single-file executables for Linux and macOS. |
-| DIST-004 | SHOULD | Installable as a package (`pipx install`, `uv tool install`) exposing the `renpytester` command. |
-| DIST-005 | MUST | Executables are built by CI from a tagged commit and attached to a GitHub release. No hand-built releases. |
-| DIST-006 | MUST | The executable and the from-source run behave identically; the test suite's end-to-end tests run against both. |
+| DIST-002 | MUST | Single-file executable for Windows, with the harness and the graphical interface embedded. No installer, no Python needed. It is made with PyInstaller by `tools/build_exe.py`, for the system the tool is run on, and written to `dist/`. It holds the files the package lists as its data (DIST-004), taken from the same list, so that the two cannot come to differ. It has the program's icon (GUI-013). |
+| DIST-003 | SHOULD | Single-file executables for Linux and macOS. They are built and tested by the same release process as the Windows one (DIST-005), on Linux x64, macOS Intel and macOS Apple Silicon. One that does not build, or does not pass its tests, is left out of the release and does not hold it back. |
+| DIST-004 | SHOULD | Installable as a package (`pipx install`, `uv tool install`) exposing the `renpytester` command. Every file of the package that is not code is listed as its data, and a test fails when one is not. |
+| DIST-005 | MUST | Executables are built by CI from a tagged commit and attached to a GitHub release. No hand-built releases. The tag is `v` followed by the version in the source (`v0.1.0`); a tag that is anything else is refused and nothing is released. Before an executable is attached, the linters, the unit tests and the end-to-end tests (DIST-006) have passed on the system it was built on. The files are named after the system, not the version (`renpytester-windows-x64.exe`), so that a link to the latest one keeps working. |
+| DIST-006 | MUST | The executable and the from-source run behave identically; the test suite's end-to-end tests run against both. With the `RENPYTESTER_EXE` environment variable naming an executable, the end-to-end tests that go through the command line start it in place of the source; those that reach into the program itself (the window's, and stopping a run at a chosen moment) cannot, and are skipped. They are run this way on the oldest and the newest supported engine. The executable does not hand its own libraries on to the programs it starts: the place it unpacked them to is taken out of the search for libraries before the game's engine is started, so that the engine loads its own. |
 
 ### 4.14 Graphical interface (GUI)
 
@@ -472,7 +472,7 @@ The harness's Python version cannot be chosen with a virtual environment, becaus
 | M5 | Reports and config (**done** 2026-10-06) | JUnit, HTML, config file, ignore rules, baseline, the partial report after Ctrl+C and the `info` command. The two SHOULD rows that add more to the config file, stated outcomes of interactions (RUN-022) and user-authored paths (EXP-009), are left for later. | REP-003, -004, -007, -010, CFG-001–007, CLI-005, -006, -008 |
 | M6 | Sandbox (**done** 2026-10-06) | Cached copy with incremental synchronisation, cache commands, and the report of files a game writes by itself. The GUI's part of SAFE-012 comes with M7. | SAFE-006, -007, -009–012 |
 | M7 | Graphical interface (**done** 2026-10-06) | The window described in 4.14. | GUI-001–017, CLI-007, COMPAT-007 |
-| M8 | Packaging | Single-file executables, release CI. | DIST |
+| M8 | Packaging (**done** 2026-10-06) | Single-file executables, release CI. The release process itself has not run yet: it runs when the first tag is pushed. | DIST-001–006, CLI-007 (the executable's part) |
 | M9 | Hardening | Screen smoke test, performance, acceptance. | UI, NFR, 7.4 |
 
 ---
@@ -492,6 +492,8 @@ Still unverified, and the requirements that depend on them:
 1. Invisible operation on Linux and macOS (GAME-007). Confirmed on Windows only.
 2. Querying a font's glyph coverage from inside the engine (TL-008).
 3. Dropping a folder onto the open window with the standard library alone (GUI-001 has a fallback).
+4. The Linux and macOS executables (DIST-003), and the release process as a whole (DIST-005). Only the Windows executable has been built and tested, on a developer's machine; the release workflow has not run.
+5. That each Ren'Py SDK download holds the engine for every system, which the release process relies on to test on Linux and macOS.
 
 ### 9.2 Decisions
 
@@ -499,12 +501,13 @@ Open:
 
 | # | Question | Recommendation |
 | --- | --- | --- |
-| D21 | Approve the version 0.17 amendments: GUI-011 added; GUI-001 to GUI-008, GUI-010, CLI-007 and COMPAT-007 made precise. In particular: `renpytester` with nothing after it now opens the window, where it used to print a usage message; and reports of runs started from the window go to the user's home folder. | Approve. |
+| D26 | Approve the version 0.22 amendments: CLI-007 and DIST-002 to DIST-006 made precise. In particular: the executable is one console program for both the terminal and the window, with its console hidden on a double click; a program whose output is read by another program never opens the window; and the Linux and macOS executables do not hold back a release when they fail. | Approve. |
 
 Settled on 2026-10-06:
 
 | # | Decision |
 | --- | --- |
+| D21 | Version 0.17 to 0.21 amendments approved (the owner approved the spec and asked for M8). |
 | D25 | Asked for by the owner: among the advanced settings the languages come first, the sandbox has a label, and the button for its copies sits under it (GUI-016, GUI-010). The SDK folder stays in plain sight for a game that needs one. |
 | D24 | Asked for by the owner: the window shows only the game at first, with the other choices behind *Show advanced settings* (GUI-016); the report folder can be chosen (GUI-011); and dialogs open centred, without a flash (GUI-017). |
 | D23 | Asked for by the owner: the window is to look modern, like the HTML report (GUI-015). The licence stays GPL-3.0. |
@@ -557,3 +560,4 @@ Settled on 2026-10-06:
 | 2026-10-06 | 0.19 | Owner's request (D23): added GUI-015 (the window looks like the HTML report, light or dark); GUI-004 counts notes and possible issues too. |
 | 2026-10-06 | 0.20 | Owner's requests (D24): added GUI-016 (advanced settings behind a button) and GUI-017 (dialogs centred, shown once); GUI-011 lets the report folder be chosen; GUI-002 follows. |
 | 2026-10-06 | 0.21 | Owner's requests (D25): GUI-016 gives the order of the advanced settings, languages first; GUI-010 puts the button for the sandbox's copies under the sandbox option. |
+| 2026-10-06 | 0.22 | M8 built. D21 settled (0.17 to 0.21 approved). CLI-007 and DIST-002 to DIST-006 made precise: how the executable is built, named, tested and released, and how it tells a double click from a terminal. Two assumptions added to 9.1. |
