@@ -493,7 +493,7 @@ Still unverified, and the requirements that depend on them:
 1. Invisible operation on Linux and macOS (GAME-007). Confirmed on Windows only.
 2. Querying a font's glyph coverage from inside the engine (TL-008).
 3. Dropping a folder onto the open window with the standard library alone (GUI-001 has a fallback).
-4. The Linux and macOS executables (DIST-003) on a real desktop. A rehearsal of the release on 2026-10-07 built all four executables and each passed its tests on both engines, but on machines with no screen, and none of the three has been in a release: v0.1.0 has the Windows one only.
+4. The Linux and macOS executables (DIST-003) on a real desktop. A release rehearsal on 2026-10-07 built all four, and each passed its tests on both engines, on machines with no screen. Only the Windows one has been released (v0.1.0).
 5. That each Ren'Py SDK download holds the engine for every system, which the release process relies on to test on Linux and macOS. The first release run bore this out for Linux x64 and macOS Apple Silicon, with Ren'Py 8.6.0.
 
 ### 9.2 Decisions
