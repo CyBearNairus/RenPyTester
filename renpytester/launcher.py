@@ -173,10 +173,11 @@ def run_engine(game, command, work_dir, log_dir, settings, timeout, on_event=Non
     return result
 
 
-def run_command(game, command, arguments, work_dir, log_dir, timeout):
+def run_command(game, command, arguments, work_dir, log_dir, timeout, cancel=None):
     """Runs an engine command that reports through files of its own, such as lint.
 
     The harness stays inert: RENPYTESTER_EVENTS is not set. Returns (exit code or None on timeout, output).
+    `cancel` is an event that, once set, has the process shut down; that counts as a timeout.
     """
     work_dir = Path(work_dir)
     log_dir = Path(log_dir)
@@ -187,13 +188,21 @@ def run_command(game, command, arguments, work_dir, log_dir, timeout):
     saves = str(work_dir / ("saves-" + command))
     cmd = [str(game.python), str(game.main_script), str(game.basedir), command, *arguments, "--savedir", saves]
     flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-    try:
-        result = subprocess.run(
-            cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-            timeout=timeout, creationflags=flags)
-        code, output = result.returncode, result.stdout
-    except subprocess.TimeoutExpired as expired:
-        code, output = None, expired.stdout or b""
-    output = output.decode("utf-8", errors="replace")
-    (log_dir / ("output-%s.txt" % command)).write_text(output, encoding="utf-8")
-    return code, output
+    output_file = log_dir / ("output-%s.txt" % command)
+    code = None
+    with open(output_file, "wb") as output:
+        process = subprocess.Popen(
+            cmd, env=env, stdout=output, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, creationflags=flags)
+        try:
+            started = time.monotonic()
+            while time.monotonic() - started <= timeout and not (cancel is not None and cancel.is_set()):
+                try:
+                    code = process.wait(0.05)
+                    break
+                except subprocess.TimeoutExpired:
+                    pass
+        finally:
+            if process.poll() is None:
+                process.kill()
+            process.wait()
+    return code, output_file.read_text(encoding="utf-8", errors="replace")

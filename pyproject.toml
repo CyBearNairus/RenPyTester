@@ -12,7 +12,7 @@ dependencies = []
 dynamic = ["version"]
 
 [project.optional-dependencies]
-dev = ["pytest", "flake8"]
+dev = ["pytest", "flake8", "pillow"]
 
 [project.scripts]
 renpytester = "renpytester.cli:main"
@@ -24,7 +24,7 @@ packages = ["renpytester", "renpytester.report"]
 version = { attr = "renpytester.__version__" }
 
 [tool.setuptools.package-data]
-renpytester = ["harness/*.rpy", "harness/*.py", "locale/*.json"]
+renpytester = ["harness/*.rpy", "harness/*.py", "locale/*.json", "assets/*.png", "assets/*.ico"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

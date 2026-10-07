@@ -31,6 +31,8 @@ def own_cache(tmp_path_factory, monkeypatch):
     """Keeps sandbox copies made by a test out of the real cache of whoever runs the tests."""
     path = tmp_path_factory.mktemp("cache")
     monkeypatch.setenv("RENPYTESTER_CACHE", str(path))
+    # The same for what the window remembers between sessions.
+    monkeypatch.setenv("RENPYTESTER_GUI_STATE", str(path / "window.json"))
     return path
 
 

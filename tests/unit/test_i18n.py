@@ -9,7 +9,8 @@ from renpytester import i18n
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = ROOT / "renpytester"
 PARAMETER = re.compile(r"\{(\w+)\}")
-MESSAGE_ID = re.compile(r"""["']((?:cli|error|note|finding|console|kind|config|html|junit|cache)\.[a-z0-9_.]+)["']""")
+PREFIXES = "cli|error|note|finding|console|kind|config|html|junit|cache|gui"
+MESSAGE_ID = re.compile(r"""["']((?:%s)\.[a-z0-9_.]+)["']""" % PREFIXES)
 
 
 def catalogue(language):

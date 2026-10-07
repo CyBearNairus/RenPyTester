@@ -12,7 +12,7 @@ import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from renpytester import __version__, discovery, lint, sandbox
+from renpytester import __version__, config, discovery, lint, sandbox
 from renpytester.errors import ToolError, UsageError
 from renpytester.launcher import default_jobs, run_command, run_engine
 from renpytester.model import ERROR, Finding, Report
@@ -188,13 +188,38 @@ def check_output(options, basedir):
     return output_dir
 
 
-def run(options, on_progress=None):
-    """Runs every stage and returns the report. Raises ToolError when testing is impossible."""
+def prepare(game, given, config_file=None):
+    """The settings of a run of `game`, from its config file and what was asked for (CFG-002).
+
+    This is the one way in for the command line and for the window, so that both make the same run
+    of the same choices (GUI-007). Returns (the options, the config that was read).
+    """
+    basedir = discovery.resolve_basedir(game)
+    settings = config.load(config.find(basedir, config_file))
+    return build_options(game, given, settings), settings
+
+
+def describe(options, on_progress=None):
+    """Finds out what the game is, without playing it (GAME-006, CLI-008). Returns a report with
+    the game's details and, when the game cannot start, the findings that say why."""
+    options.stages = ()
+    options.sandbox = options.sandbox_verify = False
+    with tempfile.TemporaryDirectory(prefix="renpytester-info-") as output:
+        options.output = output
+        return run(options, on_progress)
+
+
+def run(options, on_progress=None, stop=None):
+    """Runs every stage and returns the report. Raises ToolError when testing is impossible.
+
+    `stop` is an event that someone else may set to end the run early. That does what Ctrl+C does:
+    the game is shut down, the game folder is restored, and what was found is still reported (CLI-006).
+    """
     # Read before anything is started: a baseline that cannot be read should not cost a whole run.
     known = load_baseline(options.baseline) if options.baseline else None
     options.sandbox = options.sandbox or options.sandbox_verify
     if not options.sandbox:
-        return run_in(options, options.game, None, known, on_progress)
+        return run_in(options, options.game, None, known, on_progress, stop)
 
     # ---- A copy of the game is tested, and the game itself is only read (SAFE-006).
     # Whatever would stop the run is looked for first: the copy can take a while to make.
@@ -202,17 +227,20 @@ def run(options, on_progress=None):
     check_output(options, original)
 
     def copying(done, total):
-        on_progress("sandbox", done=done, total=total)
+        if stop is not None and stop.is_set():
+            raise KeyboardInterrupt
+        if on_progress:
+            on_progress("sandbox", done=done, total=total)
 
     if on_progress:
         on_progress("stage", name="sandbox")
-    with sandbox.Sandbox(original, options.sandbox_verify, copying if on_progress else None) as box:
-        report = run_in(options, box.copy, original, known, on_progress)
+    with sandbox.Sandbox(original, options.sandbox_verify, copying) as box:
+        report = run_in(options, box.copy, original, known, on_progress, stop)
     report.sandbox = box.describe()
     return report
 
 
-def run_in(options, basedir, original, known, on_progress):
+def run_in(options, basedir, original, known, on_progress, stop=None):
     """Tests the game in `basedir`. `original` is the game that folder is a sandbox copy of, or None."""
     game = discovery.discover(basedir, options.sdk)
     if options.jobs is None:
@@ -241,7 +269,8 @@ def run_in(options, basedir, original, known, on_progress):
         report.stages[name] = {"status": "not_implemented"}
 
     progress_lock = threading.RLock()
-    cancel = threading.Event()
+    # Set to have every game process shut down: by `stop`, from outside, or when one of them fails.
+    cancel = stop if stop is not None else threading.Event()
 
     def progress(kind, **data):
         if on_progress:
@@ -268,7 +297,9 @@ def run_in(options, basedir, original, known, on_progress):
             logs = output_dir / "engine-logs"
             probe = run_engine(
                 game, "renpytester_info", work_dir, logs, harness_settings, options.timeout,
-                show_window=options.show_window)
+                show_window=options.show_window, cancel=cancel)
+            if probe.cancelled:
+                raise KeyboardInterrupt
             hello = next((e for e in probe.events if e["ev"] == "hello"), None)
 
             if hello is None:
@@ -294,7 +325,7 @@ def run_in(options, basedir, original, known, on_progress):
                 translated = []
                 if LINT in options.stages:
                     progress("stage", name=LINT)
-                    jobs.append((run_lint, (game, options, work_dir, output_dir, report, progress)))
+                    jobs.append((run_lint, (game, options, work_dir, output_dir, report, progress, cancel)))
                 if ROUTES in options.stages:
                     progress("stage", name=ROUTES)
                     jobs.append((explore_routes, (
@@ -310,7 +341,11 @@ def run_in(options, basedir, original, known, on_progress):
                     in_parallel(jobs, lambda function, arguments: function(*arguments), cancel)
                 else:
                     for function, arguments in jobs:
-                        function(*arguments)
+                        if not cancel.is_set():
+                            function(*arguments)
+                if cancel.is_set():
+                    # Asked to stop from outside. (A failure in a game process raises before this.)
+                    raise KeyboardInterrupt
                 if partial:
                     finish_routes(game, options, partial.pop("exploration"), output_dir, report)
                 # Last, and from here, so that the order of the findings never depends on which
@@ -361,7 +396,7 @@ def run_in(options, basedir, original, known, on_progress):
     return report
 
 
-def run_lint(game, options, work_dir, output_dir, report, progress):
+def run_lint(game, options, work_dir, output_dir, report, progress, cancel=None):
     """Runs the engine's own lint and turns its report into findings (spec 4.6)."""
     stage = report.stages[LINT]
     stage["status"] = "running"
@@ -371,7 +406,8 @@ def run_lint(game, options, work_dir, output_dir, report, progress):
     # Lint reads the whole script without playing it, so it gets a time limit, not a progress watchdog.
     timeout = max(options.timeout, 300)
     wanted = list(lint.EXTRA_OPTIONS)
-    code, output = run_command(game, "lint", [str(lint_file), *wanted], work_dir, output_dir / "engine-logs", timeout)
+    logs = output_dir / "engine-logs"
+    code, output = run_command(game, "lint", [str(lint_file), *wanted], work_dir, logs, timeout, cancel)
 
     rejected = lint.unrecognised_options(output)
     if rejected and not lint_file.exists():
@@ -379,8 +415,10 @@ def run_lint(game, options, work_dir, output_dir, report, progress):
         wanted = [i for i in wanted if i not in rejected]
         stage["unsupported_options"] = rejected
         report.notes.append({"message_id": "note.lint_options", "params": {"options": ", ".join(rejected)}})
-        code, output = run_command(
-            game, "lint", [str(lint_file), *wanted], work_dir, output_dir / "engine-logs", timeout)
+        code, output = run_command(game, "lint", [str(lint_file), *wanted], work_dir, logs, timeout, cancel)
+
+    if cancel is not None and cancel.is_set():
+        return  # Stopped; the stage stays unfinished, and the report says so.
 
     if not lint_file.exists():
         stage["status"] = "failed"

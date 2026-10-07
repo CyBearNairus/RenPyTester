@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Version 0.15 **approved** by the project owner on 2026-10-06. Version 0.16 amendments (from building M6) await approval. |
+| Status | Version 0.16 **approved** by the project owner on 2026-10-06. Version 0.17 amendments (from building M7) await approval. Version 0.18 adds three requirements the owner asked for. |
 | Last updated | 2026-10-06 |
 
 This document is the source of truth for what RenPyTester does.
@@ -298,7 +298,7 @@ Translation testing MUST NOT multiply run time by the number of languages: check
 | CLI-004 | MUST | `--fail-on error\|warning\|info\|never` sets the threshold (default `error`). |
 | CLI-005 | MUST | `--help` documents every option with its default; `--version` prints the version. |
 | CLI-006 | MUST | Ctrl+C stops the game, cleans up (SAFE-002), and still writes a partial report marked incomplete. The report is written in every format, has what was found until then, and gives each stage that had not finished the status `interrupted`. The exit code is 3, as for any run that is not complete. |
-| CLI-007 | MUST | Launched with no arguments (for example by double-click), the executable opens the graphical interface (4.14). Dragging a game folder onto the executable opens the graphical interface with that game already selected. `renpytester gui [GAME]` does the same from a terminal. |
+| CLI-007 | MUST | Launched with no arguments (for example by double-click), the executable opens the graphical interface (4.14). Dragging a game folder onto the executable opens the graphical interface with that game already selected. `renpytester gui [GAME]` does the same from a terminal. `renpytester gui` takes `--lang`. A dropped folder is told from a game named in a terminal by where the program was started: the folder is the only argument, and the program has a console window to itself, which is what Windows gives a program started by a double click or a drop. Anything typed into a terminal with a game after it is a run in the terminal (CLI-001). How this works for a packaged executable is settled with M8. |
 | CLI-008 | SHOULD | `renpytester info GAME` prints what GAME-006 detects and exits, without running the game's story. It writes no report. When the game cannot start, it says why and exits with code 1. |
 | CLI-009 | — | *Withdrawn in 0.2.* Replaced by section 4.14. |
 | CLI-010 | MUST | `--lang en\|pt-BR` selects the interface language (4.15). |
@@ -326,7 +326,7 @@ Translation testing MUST NOT multiply run time by the number of languages: check
 | COMPAT-004 | MUST | A game on Ren'Py 7 or older is detected before anything is launched or injected, and refused with a clear message that Python 2 engines are not supported (exit 3). An unrecognised newer engine version produces a warning and a best-effort run, not a crash. |
 | COMPAT-005 | MUST | When a check cannot be performed on a given engine version, the report lists it as *skipped* with the reason. A skipped check is never shown as passed. |
 | COMPAT-006 | MUST | Orchestrator runs on Python 3.11 and later. |
-| COMPAT-007 | MUST | The graphical interface works wherever the orchestrator does. When run from source on a Python without `tkinter` (some Linux distributions package it separately), the tool says which package to install and the command line remains fully usable. |
+| COMPAT-007 | MUST | The graphical interface works wherever the orchestrator does. When run from source on a Python without `tkinter` (some Linux distributions package it separately), the tool says which package to install and the command line remains fully usable. The same message is given when there is no display to open a window on. Tk is loaded only when a window is opened. |
 
 ### 4.13 Distribution (DIST)
 
@@ -346,16 +346,20 @@ It is a front end to the same run the command line performs, not a second implem
 
 | ID | Pri | Requirement |
 | --- | --- | --- |
-| GUI-001 | MUST | Choose the game by browsing for a folder or dropping one on the executable. Once chosen, show what was detected (GAME-006): name, engine version, languages. |
-| GUI-002 | MUST | Options shown as plain controls with sensible defaults: stages to run, languages to test, sandbox copy on/off (SAFE-006), and an optional SDK folder when the game needs one. Everything else stays at its default or comes from `renpytester.toml`. |
-| GUI-003 | MUST | A *Run* button that becomes *Cancel* during a run. Cancelling behaves as Ctrl+C does (CLI-006). |
-| GUI-004 | MUST | During a run: one progress bar, the current stage, and running counts of errors and warnings. No game window appears (ARCH-006). The interface stays responsive. |
-| GUI-005 | MUST | After a run: a pass/fail result, counts by severity, and a button that opens the HTML report in the default browser. |
-| GUI-006 | MUST | Problems that stop a run (no engine found, unsupported engine, game already being tested) are shown as a readable message in the window, not as a traceback or a silent exit. |
-| GUI-007 | MUST | Every GUI run can be expressed as a command line; the window shows that command so a developer can copy it into CI. |
-| GUI-008 | SHOULD | Remember the last game folder and options between sessions. |
+| GUI-001 | MUST | Choose the game by browsing for a folder or dropping one on the executable. Once chosen, show what was detected (GAME-006): name, engine version, languages. The game's path can also be typed or pasted. Finding out what the game is runs in the background, as `renpytester info` does it (CLI-008); when the game cannot be started, the window says why. |
+| GUI-002 | MUST | Options shown as plain controls with sensible defaults: stages to run, languages to test, sandbox copy on/off (SAFE-006), and an optional SDK folder when the game needs one. Everything else stays at its default or comes from `renpytester.toml`. The SDK control is shown only for a game that has no engine of its own, and starts with the folder the `RENPY_SDK` environment variable names, if any. There is one box for each language the game has, all ticked at first. *Run* is not available while nothing is ticked to check, or translations are ticked with no language. |
+| GUI-003 | MUST | A *Run* button that becomes *Cancel* during a run. Cancelling behaves as Ctrl+C does (CLI-006). Closing the window during a run cancels the run first, and the window closes when the game folder has been restored. |
+| GUI-004 | MUST | During a run: one progress bar, the current stage, and running counts of errors and warnings. No game window appears (ARCH-006). The interface stays responsive. The bar shows how much of the script has been played; until the game reports in, it shows only that work is going on. The controls cannot be changed during a run. |
+| GUI-005 | MUST | After a run: a pass/fail result, counts by severity, and a button that opens the HTML report in the default browser. A second button opens the folder the reports are in. |
+| GUI-006 | MUST | Problems that stop a run (no engine found, unsupported engine, game already being tested) are shown as a readable message in the window, not as a traceback or a silent exit. This goes for a config file with a mistake in it (CFG-004), and for a failure of RenPyTester itself, which is shown as that (NFR-004). |
+| GUI-007 | MUST | Every GUI run can be expressed as a command line; the window shows that command so a developer can copy it into CI. The command has only what differs from the defaults, quoted for the user's own terminal, and the window's language as `--lang`. Given to the command line, it makes a run with the same settings. |
+| GUI-008 | SHOULD | Remember the last game folder and options between sessions. Also the SDK folder and the window's language. They are kept in a file in the user's profile, which the `RENPYTESTER_GUI_STATE` environment variable can move. |
 | GUI-009 | SHOULD | List the findings in the window itself, with file and line, without opening the report. |
-| GUI-010 | SHOULD | Manage cached sandbox copies (SAFE-012). |
+| GUI-010 | SHOULD | Manage cached sandbox copies (SAFE-012). A dialog lists the copies with their size and when they were last used, and deletes the selected ones or all of them. |
+| GUI-011 | MUST | A run started from the window saves its reports in a folder named `renpytester-report` in the user's home folder, unless the game's config file names another (CFG-002). The window says where, and the command it shows has that folder as `--output`. The command line's default, a folder beside wherever the command was typed (REP-005), means nothing to someone who started the program with a double click. |
+| GUI-012 | MUST | The window's language selector shows each interface language by its name (*English*, *Brazilian Portuguese*), not by its code, and the names themselves follow the language the window is in. The name of every language is in every message file, so that adding a language still needs no change to the code (I18N-008). |
+| GUI-013 | MUST | The program has an icon of its own, original artwork, which the window, its dialogs and the taskbar or dock entry show in place of Python's. The icon files are part of the package, and are made by a development tool from a drawing in code, so that they can be made again. A window that cannot load the icon opens without it. |
+| GUI-014 | MUST | An *About* button opens a dialog with the program's name, icon and version, a credit to its author, CyBearNairus, its licence, and the address of its GitHub repository, which opens in the default browser when clicked. Nothing is fetched from the network unless the user clicks that link (SAFE-008). |
 
 ### 4.15 Interface languages (I18N)
 
@@ -464,7 +468,7 @@ The harness's Python version cannot be chosen with a virtual environment, becaus
 | M4 | Translations (**done** 2026-10-06) | Language discovery and all TL MUSTs. The SHOULD and COULD rows of 4.7 are left for later, except orphan translations (TL-007), which lint already reports. | TL-001–006, -012 |
 | M5 | Reports and config (**done** 2026-10-06) | JUnit, HTML, config file, ignore rules, baseline, the partial report after Ctrl+C and the `info` command. The two SHOULD rows that add more to the config file, stated outcomes of interactions (RUN-022) and user-authored paths (EXP-009), are left for later. | REP-003, -004, -007, -010, CFG-001–007, CLI-005, -006, -008 |
 | M6 | Sandbox (**done** 2026-10-06) | Cached copy with incremental synchronisation, cache commands, and the report of files a game writes by itself. The GUI's part of SAFE-012 comes with M7. | SAFE-006, -007, -009–012 |
-| M7 | Graphical interface | The window described in 4.14. | GUI, CLI-007 |
+| M7 | Graphical interface (**done** 2026-10-06) | The window described in 4.14. | GUI-001–014, CLI-007, COMPAT-007 |
 | M8 | Packaging | Single-file executables, release CI. | DIST |
 | M9 | Hardening | Screen smoke test, performance, acceptance. | UI, NFR, 7.4 |
 
@@ -492,12 +496,14 @@ Open:
 
 | # | Question | Recommendation |
 | --- | --- | --- |
-| D20 | Approve the version 0.16 amendments: SAFE-006, SAFE-007 and SAFE-009 to SAFE-012 made precise. In particular: several game processes share the one sandbox copy; a game writing its own files is a note, not a finding; and the copy is kept identical to the game, so the engine compiles the scripts again on every run. | Approve. |
+| D21 | Approve the version 0.17 amendments: GUI-011 added; GUI-001 to GUI-008, GUI-010, CLI-007 and COMPAT-007 made precise. In particular: `renpytester` with nothing after it now opens the window, where it used to print a usage message; and reports of runs started from the window go to the user's home folder. | Approve. |
 
 Settled on 2026-10-06:
 
 | # | Decision |
 | --- | --- |
+| D22 | Asked for by the owner: the window's language selector shows names, not codes (GUI-012); the program has an icon (GUI-013); and an *About* dialog gives the version, credits CyBearNairus and links to the repository (GUI-014). |
+| D20 | Version 0.16 amendments approved: SAFE-006, SAFE-007 and SAFE-009 to SAFE-012 made precise. Several game processes share the one sandbox copy, and a game writing its own files is a note, not a finding. |
 | D19 | Version 0.15 amendments approved: REP-010 and CFG-007 added; REP-003, REP-007, CFG-002 to CFG-006, CLI-006, CLI-008 and I18N-002 made precise. |
 | D18 | Version 0.14 amendments approved: TL-012 added; TL-001 to TL-006 made precise. |
 | D17 | Version 0.13 amendments approved: RUN-025 and RUN-026 added; RUN-014, RUN-015, EXP-003 and NFR-001 made precise. Only label runs and lint are spread over several processes; the story is explored by one. |
@@ -540,3 +546,5 @@ Settled on 2026-10-06:
 | 2026-10-06 | 0.14 | M4 built. D17 settled (0.13 approved). Added TL-012 (summary for each language); TL-001 to TL-006 made precise; `--languages` added to CLI-011. |
 | 2026-10-06 | 0.15 | M5 built. D18 settled (0.14 approved). Added REP-010 (all three formats, from the same data) and CFG-007 (severity of a class); REP-003, REP-007, CFG-002 to CFG-006, CLI-006, CLI-008 and I18N-002 made precise; `--config` and `--baseline` added to CLI-011. |
 | 2026-10-06 | 0.16 | M6 built. D19 settled (0.15 approved). SAFE-006, SAFE-007 and SAFE-009 to SAFE-012 made precise; `--sandbox` and `--sandbox-verify` added to CLI-011; the assumption about parallel processes in a sandbox settled by decision (9.1). |
+| 2026-10-06 | 0.17 | M7 built. D20 settled (0.16 approved). Added GUI-011 (where the window saves reports); GUI-001 to GUI-008, GUI-010, CLI-007 and COMPAT-007 made precise. |
+| 2026-10-06 | 0.18 | Owner's requests (D22): added GUI-012 (languages shown by name), GUI-013 (the program's icon) and GUI-014 (the *About* dialog). |

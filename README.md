@@ -14,12 +14,30 @@ You are also told about translations with a broken text tag, translations that s
 As the story is played, every translation of each line is tried out in the state the game is really in, so a translation that uses a variable the game does not have is found without playing the game again in each language.
 
 This is an early version.
-A graphical interface and a single-file executable are planned; see [docs/SPEC.md](docs/SPEC.md).
+A single-file executable, which needs no Python, is planned; see [docs/SPEC.md](docs/SPEC.md).
 
 ## Usage
 
 You need Python 3.11 or later.
 Nothing else has to be installed.
+
+### In a window
+
+```text
+python -m renpytester
+```
+
+A window opens.
+Choose the game's folder, tick what you want checked, and press *Run*.
+The window shows the progress, then whether the game passed, the problems found with their file and line, and a button that opens the full report.
+*Cancel* stops a run and puts the game folder back as it was.
+The window also shows the command that makes the same run from a terminal, to copy into a script or a build server.
+Its reports are saved in a folder named `renpytester-report` in your home folder.
+
+`python -m renpytester gui PATH_TO_GAME` opens the window with that game already chosen.
+On some Linux systems Python comes without the part that draws windows; RenPyTester then tells you which package to install, and everything below still works.
+
+### In a terminal
 
 ```text
 python -m renpytester PATH_TO_GAME

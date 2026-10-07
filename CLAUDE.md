@@ -6,8 +6,8 @@ Runnable from source with plain Python or as a single-file executable, from a te
 ## Current state
 
 **Milestones M0 (spikes), M1 (walking skeleton), M2 (lint stage), M3a (exploration), M3b (checks that need no rendering), M3c (getting past minigames), M3d (label runs), M3e (parallel processes) and M4 (translations) are done.**
-**M5 (reports and config) and M6 (sandbox) are done too. M7 (graphical interface) is next.**
-[docs/SPEC.md](docs/SPEC.md) version 0.15 is approved; the 0.16 amendments that came out of building M6 are waiting for the owner's approval (decision D20 in spec section 9.2).
+**M5 (reports and config), M6 (sandbox) and M7 (graphical interface) are done too. M8 (packaging) is next.**
+[docs/SPEC.md](docs/SPEC.md) version 0.16 is approved; the 0.17 amendments that came out of building M7 are waiting for the owner's approval (decision D21 in spec section 9.2).
 What works today: `python -m renpytester GAME` finds the game and its engine and explores every choice of every menu with no window, using in-memory snapshots, and carries on after a crash or a hang.
 While playing it checks for undefined images, missing image, audio and movie files, broken text tags and menus with nothing to choose.
 It also runs the engine's lint and turns its report into findings, merged with what playing found.
@@ -24,7 +24,9 @@ Settings can be kept in a `renpytester.toml` in the game folder: any option, ign
 `--baseline` leaves out what an earlier report already had, Ctrl+C still writes a report of what was found, and `renpytester info GAME` says what a game is without playing it.
 With `--sandbox` a copy of the game is tested and the game itself is only read; the copy is kept in a per-user cache and brought up to date on later runs, and `renpytester cache list` and `cache clear` manage it.
 A game whose own script writes into its folder is told so in the report.
-Not built yet: GUI (M7), packaging (M8).
+`python -m renpytester` with nothing after it, or `renpytester gui [GAME]`, opens a window that makes the same runs: choose the game, tick what to check, run or cancel, and read the result and the findings there.
+The window has the program's own icon, lists its languages by name, and has an *About* dialog with the version, the author and the repository.
+Not built yet: packaging (M8).
 Engine facts and hooks are recorded in [docs/SPIKES.md](docs/SPIKES.md): read it before touching the harness.
 `spikes/` holds the throwaway M0 experiments; never import from it.
 
@@ -68,6 +70,18 @@ The ones that cause real damage if forgotten:
   No hard-coded text in console, GUI or HTML output.
   Machine-readable output (JSON keys, finding classes, exit codes) stays language-neutral.
 - **The GUI is a front end to the same run as the CLI**, never a second implementation.
+  Both get their settings from `runner.prepare` and run with `runner.run`; the window adds no setting the command line lacks, and shows the command that makes the same run.
+- **In the window, only the main thread touches Tk.**
+  `gui.Session` does the work in threads and has no widgets; it talks to `gui.Window` through a queue that the window empties on a timer.
+  Never call a widget, or a Tk variable, from a session thread.
+  Tk objects must also not be freed by another thread: Python frees things in whichever thread is running, and a Tk interpreter freed by the wrong one stops the process.
+  That is why the window keeps replaced variables, and why the window tests let go of each window in the main thread.
+- **A run is stopped from outside by setting the `stop` event given to `runner.run`**, which does exactly what Ctrl+C does.
+  Everything that waits on a game process must look at that event; a new wait that does not would make *Cancel* hang.
+- **The icon is drawn by `tools/make_icon.py`**, which needs Pillow, a development tool only; the files it writes under `renpytester/assets/` are committed.
+  To change the icon, change the drawing in that tool and run it; never edit the image files or bring in artwork from elsewhere.
+  On Windows each window is given the icon by itself with `iconbitmap`, because Tk's ways of setting one icon for all windows set none there.
+- **The window is never shown in tests** (`root.withdraw()`), and tests must replace `gui.default_output`: the real one is in the user's home folder.
 - **Never re-implement the engine.** Parsing, lint, translation lookup and text substitution are done by the game's own Ren'Py, never by our code.
 - **A translation is not at fault for what its original does too.**
   Text such as `"Page {}"` is filled in by Python and reads as a broken tag in every language; a translated line is reported only when the original passes the same check.
@@ -165,7 +179,7 @@ Paths to these come from environment variables.
 - `renpytester/`: the orchestrator.
   `cli` parses options, `discovery` finds the game and engine, `workspace` prepares and restores the game folder, and `launcher` runs the engine invisibly.
   `lint` reads the engine's lint report, `routes` adds up coverage and tracks unexplored branches, `runner` ties a run together, and `model` holds findings and the report.
-  `config` reads `renpytester.toml`, `sandbox` keeps the cached copies, `i18n` and `locale/` hold every user-facing string, and `report/` writes output.
+  `config` reads `renpytester.toml`, `sandbox` keeps the cached copies, `gui` is the window, `i18n` and `locale/` hold every user-facing string, and `report/` writes output.
   The JUnit and HTML writers take the JSON report's data, never the `Report` object: what is not in the JSON cannot be in them.
 - `renpytester/harness/zzz_renpytester_harness.rpy`: the script injected into the game.
 - `tests/fixtures/games/`: one small game per behaviour under test. A new finding class needs a new fixture.

@@ -2,8 +2,8 @@
 
 import argparse
 import sys
-import tempfile
 import traceback
+from pathlib import Path
 
 from renpytester import __version__, config, discovery, i18n, report, runner, sandbox
 from renpytester.errors import ToolError
@@ -21,6 +21,8 @@ EXIT_TOOL = 3
 INFO = "info"
 # The command that shows and deletes the cached copies that --sandbox makes (SAFE-012).
 CACHE = "cache"
+# The command that opens the window (CLI-007).
+GUI = "gui"
 
 
 def language_from(argv):
@@ -70,6 +72,13 @@ def build_parser():
     return parser
 
 
+def build_window_parser():
+    parser = argparse.ArgumentParser(prog="renpytester " + GUI, description=t("cli.gui.description"))
+    parser.add_argument("game", metavar="GAME", nargs="?", help=t("cli.gui.game"))
+    parser.add_argument("--lang", choices=i18n.LANGUAGES, help=t("cli.lang"))
+    return parser
+
+
 def build_cache_parser():
     parser = argparse.ArgumentParser(prog="renpytester " + CACHE, description=t("cli.cache.description"))
     parser.add_argument("action", choices=("list", "clear"), help=t("cli.cache.action"))
@@ -106,11 +115,10 @@ def given_by(args):
 
 def prepare(args, given, language_given):
     """Reads the config file that goes with the game and returns the settings of the run (CFG-002)."""
-    basedir = discovery.resolve_basedir(args.game)
-    settings = config.load(config.find(basedir, args.config))
+    options, settings = runner.prepare(args.game, given, args.config)
     if settings.lang and not language_given:
         i18n.set_language(settings.lang)  # I18N-002: the command line, then the config file, then the system.
-    return runner.build_options(args.game, given, settings)
+    return options
 
 
 def fail(console, error):
@@ -130,11 +138,7 @@ def info(argv, language_given):
     args = build_info_parser().parse_args(argv)
     console = Console()
     try:
-        options = prepare(args, {"sdk": args.sdk, "stages": None}, language_given)
-        options.stages = ()
-        with tempfile.TemporaryDirectory(prefix="renpytester-info-") as output:
-            options.output = output
-            result = runner.run(options, console.progress)
+        result = runner.describe(prepare(args, {"sdk": args.sdk}, language_given), console.progress)
     except ToolError as error:
         return fail(console, error)
     except KeyboardInterrupt:
@@ -151,6 +155,48 @@ def info(argv, language_given):
         console.listing(result.findings)
         return EXIT_FINDINGS
     return EXIT_OK
+
+
+def own_console():
+    """True when this process has a console window all to itself. On Windows that is what a program
+    gets when it is started by a double click, or by dropping something on it, and not from a terminal."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+
+        processes = (ctypes.c_uint * 4)()
+        return ctypes.windll.kernel32.GetConsoleProcessList(processes, 4) == 1
+    except Exception:
+        return False
+
+
+def window_wanted(argv, alone=None):
+    """Decides whether to open the window instead of running in the terminal (CLI-007).
+
+    Returns (whether it is wanted, the game to open it with or None). It is wanted when nothing
+    was asked for, when `gui` was, and when a folder was dropped on the program: the folder then
+    arrives as the only argument, to a process that no terminal started.
+    """
+    if not argv:
+        return True, None
+    if argv[0] == GUI:
+        args = build_window_parser().parse_args(argv[1:])
+        return True, args.game
+    dropped = len(argv) == 1 and not argv[0].startswith("-") and Path(argv[0]).exists()
+    if dropped and (own_console() if alone is None else alone):
+        return True, argv[0]
+    return False, None
+
+
+def window(game, lang):
+    """Opens the window (4.14). Without Tk, says what to install; the command line still works (COMPAT-007)."""
+    from renpytester import gui
+
+    try:
+        return gui.main(game, lang)
+    except ToolError as error:
+        return fail(Console(), error)
 
 
 def cache(argv):
@@ -198,6 +244,9 @@ def main(argv=None):
         wanted = None  # argparse reports the bad value below.
     i18n.set_language(wanted)
 
+    wanted_window, game = window_wanted(argv)
+    if wanted_window:
+        return window(game, wanted)
     if argv and argv[0] == INFO:
         return info(argv[1:], wanted is not None)
     if argv and argv[0] == CACHE:
