@@ -118,14 +118,18 @@ class Watcher:
         self.user.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
         self.dword = wintypes.DWORD
         self.own = self.kernel.GetCurrentProcessId()
+        # Whatever is running already was not started by this run. Without this, a program whose
+        # long-gone parent had the number that one of the game's processes is given later would be
+        # taken for that process's child: on a build machine, the terminal the tests run in.
+        self.before = set(self.running()[0])
         self.processes = {}
         self.windows = set()
         self.looks = 0
         self.stop = threading.Event()
         self.thread = threading.Thread(target=self.watch, daemon=True)
 
-    def started_by_us(self):
-        """The processes this one started, and those they started: {pid: program name}."""
+    def running(self):
+        """Every process there is: ({pid: its parent's pid}, {pid: program name})."""
         snapshot = self.kernel.CreateToolhelp32Snapshot(2, 0)
         entry = self.Entry()
         entry.size = ctypes.sizeof(entry)
@@ -135,13 +139,19 @@ class Watcher:
             parents[entry.pid], names[entry.pid] = entry.parent, entry.name
             more = self.kernel.Process32NextW(snapshot, ctypes.byref(entry))
         self.kernel.CloseHandle(snapshot)
+        return parents, names
 
+    def started_by_us(self):
+        """The processes this one started since the watch began, and those they started: {pid: program name}."""
+        parents, names = self.running()
         found = {}
         for pid in parents:
+            if pid in self.before:
+                continue
             ancestor, steps = parents.get(pid), 0
-            while ancestor and ancestor != self.own and steps < 32:
+            while ancestor and ancestor != self.own and ancestor not in self.before and steps < 32:
                 ancestor, steps = parents.get(ancestor), steps + 1
-            if ancestor == self.own and pid != self.own:
+            if ancestor == self.own:
                 found[pid] = names[pid]
         return found
 

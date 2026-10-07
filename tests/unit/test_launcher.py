@@ -9,7 +9,8 @@ from types import SimpleNamespace
 import pytest
 
 from renpytester.launcher import (
-    MAX_DEFAULT_JOBS, SILENT_EDITOR, Startup, build_environment, default_jobs, run_command, run_engine)
+    MAX_DEFAULT_JOBS, SILENT_EDITOR, STARTUP_SECONDS, Startup, build_environment, default_jobs, run_command,
+    run_engine)
 
 
 @pytest.fixture
@@ -135,6 +136,25 @@ def test_process_that_dies_before_loading_the_game_lets_the_next_one_start(stand
     started = time.monotonic()
     assert Startup(stand_in, tmp_path, "run").enter() is True
     assert time.monotonic() - started < 1
+
+
+@pytest.mark.req("RUN-008")
+def test_game_that_is_still_starting_is_not_taken_for_one_that_stopped(stand_in, tmp_path):
+    # The stand-in takes a second and reports nothing: longer than the time allowed without progress.
+    assert STARTUP_SECONDS >= 60
+    result = run_engine(stand_in, "run", tmp_path / "work", tmp_path / "logs", {}, 0.2)
+    assert (result.timed_out, result.exit_code) == (False, 0)
+
+    # Once it has reported in, going quiet for that long is a hang.
+    stand_in.main_script.write_text(
+        "import os, time\n"
+        "with open(os.environ['RENPYTESTER_EVENTS'], 'a') as events:\n"
+        "    events.write('{\"ev\": \"hello\"}\\n')\n"
+        "time.sleep(30)\n", encoding="utf-8")
+    started = time.monotonic()
+    result = run_engine(stand_in, "run", tmp_path / "work", tmp_path / "logs", {}, 0.5)
+    assert result.timed_out is True and [event["ev"] for event in result.events] == ["hello"]
+    assert time.monotonic() - started < 15
 
 
 @pytest.mark.req("RUN-027")

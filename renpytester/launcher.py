@@ -112,6 +112,10 @@ def available_memory():
         return None
 
 
+# How long a game process is given to report in for the first time, however short the time allowed
+# without progress: starting the engine and reading the script is not a game that has stopped (RUN-008).
+STARTUP_SECONDS = 60
+
 # What one game process is allowed for when choosing how many to run at once.
 MEMORY_PER_PROCESS = 768 * 1024 * 1024
 MAX_DEFAULT_JOBS = 8
@@ -241,7 +245,8 @@ def run_engine(game, command, work_dir, log_dir, settings, timeout, on_event=Non
                     if cancel is not None and cancel.is_set():
                         result.cancelled = True
                         break
-                    if time.monotonic() - last_activity > timeout:
+                    allowed = timeout if result.events else max(timeout, STARTUP_SECONDS)
+                    if time.monotonic() - last_activity > allowed:
                         result.timed_out = True
                         break
                     time.sleep(0.02)

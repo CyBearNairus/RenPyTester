@@ -168,7 +168,7 @@ The harness must get through a game with no human present.
 | RUN-005 | MUST | Answer text input prompts with a configurable value (default `Tester`), honouring the prompt's length and allowed-character limits. |
 | RUN-006 | MUST | Handle `call screen` and other custom interactions by enumerating the activatable elements on screen and choosing among them as decisions, the same way menu choices are. If nothing activatable can be found, report a `stuck` finding and end the path. |
 | RUN-007 | MUST | Treat return to main menu, end of script, and a game-initiated quit as a normal end of path, not an error, and continue with the next path. |
-| RUN-008 | MUST | Emit a heartbeat with the current script location. If the orchestrator sees no progress for `--timeout` seconds (default 60) it kills the game, reports a `hang` finding with the last known location and path, and continues with remaining work. |
+| RUN-008 | MUST | Emit a heartbeat with the current script location. If the orchestrator sees no progress for `--timeout` seconds (default 60) it kills the game, reports a `hang` finding with the last known location and path, and continues with remaining work. A game process that has not reported in yet is still starting, and is given at least 60 seconds to, however short the timeout: reading and compiling a script is not a hang. |
 | RUN-009 | MUST | Detect a path that keeps executing without reaching new statements (step budget per path, default configurable) and end it with a `loop` finding of severity *warning*. |
 | RUN-010 | MUST | Seed the game's random number generator so that the same command on the same game produces the same paths and findings. The seed is configurable and recorded in the report. |
 | RUN-011 | MUST | After an error on one path, continue testing other paths. One crash never ends the run. |
@@ -508,7 +508,7 @@ Still unverified, and the requirements that depend on them:
 1. Invisible operation on Linux and macOS (GAME-007). Confirmed on Windows only.
 2. Querying a font's glyph coverage from inside the engine (TL-008).
 3. Dropping a folder onto the open window with the standard library alone (GUI-001 has a fallback).
-4. The Linux and macOS executables (DIST-003) on a real desktop. A release rehearsal on 2026-10-07 built all four, and each passed its tests on both engines, on machines with no screen. Only the Windows one has been released (v0.1.0).
+4. The Linux and macOS executables (DIST-003) on a real desktop. All four were released with v0.1.1 on 2026-10-07, each having passed its tests on both engines, on machines with no screen. Nobody has yet run the Linux or macOS one on a desktop.
 5. That each Ren'Py SDK download holds the engine for every system, which the release process relies on to test on Linux and macOS. The first release run bore this out for Linux x64 and macOS Apple Silicon, with Ren'Py 8.6.0.
 
 ### 9.2 Decisions
@@ -517,7 +517,7 @@ Open:
 
 | # | Question | Recommendation |
 | --- | --- | --- |
-| D28 | Approve the version 0.25 amendments, from building M9: UI-001 and UI-002 made precise, and `screens` made a default stage (CLI-001). In particular: a game that has run clean so far may now fail on a menu screen that was never checked before; `--stages lint,routes,translations` gives the earlier behaviour. Also approve how speed is measured (RUN-013, NFR-005) and the table that ties each item of the acceptance to its tests (7.4). | Approve. |
+| D28 | Approve the version 0.25 amendments, from building M9: UI-001 and UI-002 made precise, `screens` made a default stage (CLI-001), and RUN-008 and ARCH-004 made precise. In particular: a game that has run clean so far may now fail on a menu screen that was never checked before; `--stages lint,routes,translations` gives the earlier behaviour. Also approve how speed is measured (RUN-013, NFR-005) and the table that ties each item of the acceptance to its tests (7.4). | Approve. |
 
 Settled on 2026-10-06:
 
@@ -581,4 +581,4 @@ Settled on 2026-10-06:
 | 2026-10-06 | 0.22 | M8 built. D21 settled (0.17 to 0.21 approved). CLI-007 and DIST-002 to DIST-006 made precise: how the executable is built, named, tested and released, and how it tells a double click from a terminal. Two assumptions added to 9.1. |
 | 2026-10-07 | 0.23 | Owner's request (D27): added RUN-027 (game processes start one at a time). DIST-005 allows a rehearsal started by hand. Section 9.1 brought up to date with the first release run. |
 | 2026-10-07 | 0.24 | D26 settled (0.22 approved). Nothing is waiting for approval. |
-| 2026-10-07 | 0.25 | M9 built. UI-001 and UI-002 made precise: the `screens` stage builds each standard menu screen without drawing it, in every language checked, and is a default stage (CLI-001). RUN-013 and NFR-005 say how speed is measured. Section 7.3 has a test of traceability, and 7.4 names the tests of each item of the acceptance. RUN-014, RUN-027, ARCH-007 and GUI-002 mention the new stage. ARCH-004 says how files are named for a game with no source, which a new test found wrong on Ren'Py 8.0. D28 opened. |
+| 2026-10-07 | 0.25 | M9 built. UI-001 and UI-002 made precise: the `screens` stage builds each standard menu screen without drawing it, in every language checked, and is a default stage (CLI-001). RUN-013 and NFR-005 say how speed is measured. Section 7.3 has a test of traceability, and 7.4 names the tests of each item of the acceptance. RUN-014, RUN-027, ARCH-007 and GUI-002 mention the new stage. ARCH-004 says how files are named for a game with no source, which a new test found wrong on Ren'Py 8.0. RUN-008 gives a game that is still starting at least a minute, after a short timeout was taken for a hang on a slow machine. D28 opened. |

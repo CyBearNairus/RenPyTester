@@ -33,7 +33,9 @@ What to check, the languages, the sandbox and the report folder are *advanced se
 The window has the program's own icon, lists its languages by name, and has an *About* dialog with the version, the author and the repository.
 `python tools/build_exe.py` makes the single-file executable, `dist/renpytester.exe` on Windows, which is the same program with Python inside it.
 Pushing a tag such as `v0.1.0` has GitHub build it, test it and attach it to a release.
-v0.1.0 was released that way with the Windows executable only; since then a rehearsal has built and tested all four, so the next tag should release them all.
+v0.1.1 was released that way with all four executables: Windows, Linux, macOS Apple Silicon and macOS Intel.
+Before tagging, start the same workflow by hand as a rehearsal: an executable that fails its tests is left out of the release without stopping it.
+If a job of the tag's own run fails on a test that depends on timing, `gh run rerun RUN --failed` runs it again for the same tag.
 Engine facts and hooks are recorded in [docs/SPIKES.md](docs/SPIKES.md): read it before touching the harness.
 `spikes/` holds the throwaway M0 experiments; never import from it.
 
@@ -83,6 +85,8 @@ The ones that cause real damage if forgotten:
   Never call a widget, or a Tk variable, from a session thread.
   Tk objects must also not be freed by another thread: Python frees things in whichever thread is running, and a Tk interpreter freed by the wrong one stops the process.
   That is why the window keeps replaced variables, and why the window tests let go of each window in the main thread.
+- **A game process that has not reported in yet is starting, not hanging.**
+  `launcher.run_engine` gives it at least `STARTUP_SECONDS` before its first event, however short `--timeout` is; on a slow machine the engine takes longer than a few seconds to read a script.
 - **A run is stopped from outside by setting the `stop` event given to `runner.run`**, which does exactly what Ctrl+C does.
   Everything that waits on a game process must look at that event; a new wait that does not would make *Cancel* hang.
 - **The icon is drawn by `tools/make_icon.py`**, which needs Pillow, a development tool only; the files it writes under `renpytester/assets/` are committed.
