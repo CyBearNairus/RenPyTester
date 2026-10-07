@@ -29,7 +29,7 @@ What to check, the languages, the sandbox and the report folder are *advanced se
 The window has the program's own icon, lists its languages by name, and has an *About* dialog with the version, the author and the repository.
 `python tools/build_exe.py` makes the single-file executable, `dist/renpytester.exe` on Windows, which is the same program with Python inside it.
 Pushing a tag such as `v0.1.0` has GitHub build it, test it and attach it to a release.
-v0.1.0 was released that way with the Windows executable only; the Linux and macOS ones have not yet passed their tests.
+v0.1.0 was released that way with the Windows executable only; since then a rehearsal has built and tested all four, so the next tag should release them all.
 Engine facts and hooks are recorded in [docs/SPIKES.md](docs/SPIKES.md): read it before touching the harness.
 `spikes/` holds the throwaway M0 experiments; never import from it.
 
