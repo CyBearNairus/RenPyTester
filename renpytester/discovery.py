@@ -48,7 +48,7 @@ def platform_lib_names():
     if sys.platform == "win32":
         return ["py3-windows-x86_64"]
     if sys.platform == "darwin":
-        return ["py3-mac-universal", "py3-mac-arm64" if machine == "arm64" else "py3-mac-x86_64", "py3-mac-x86_64"]
+        return ["py3-mac-universal", *(["py3-mac-arm64"] if machine == "arm64" else []), "py3-mac-x86_64"]
     if machine in ("aarch64", "arm64"):
         return ["py3-linux-aarch64", "py3-linux-x86_64"]
     return ["py3-linux-x86_64"]

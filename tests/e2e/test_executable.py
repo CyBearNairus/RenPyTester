@@ -54,8 +54,9 @@ def test_executable_carries_the_harness_the_window_and_every_data_file(exe):
         assert "renpytester/" + file.relative_to(package).as_posix() in held, file
 
     # The window: Tk's own library, the files it reads as it starts, and Python's part of it.
-    assert any(name.startswith("_tkinter") for name in held)
-    assert any(name.startswith(("_tcl_data/", "tcl/")) for name in held)
+    # Where these are put differs from one system to another; their names do not.
+    assert any(name.split("/")[-1].startswith("_tkinter") for name in held)
+    assert any(name.split("/")[-1] == "init.tcl" for name in held)
     modules = archive.open_embedded_archive("PYZ.pyz").toc
     for module in ("tkinter", "tkinter.ttk", "renpytester.gui", "renpytester.report.html_report"):
         assert module in modules, module
