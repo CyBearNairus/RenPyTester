@@ -2,8 +2,8 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Version 0.21 **approved** by the project owner on 2026-10-06. Version 0.22 amendments (from building M8) await approval. |
-| Last updated | 2026-10-06 |
+| Status | Version 0.21 **approved** by the project owner on 2026-10-06. Version 0.22 amendments (from building M8) await approval. Version 0.23 adds a requirement the owner asked for. |
+| Last updated | 2026-10-07 |
 
 This document is the source of truth for what RenPyTester does.
 Code is written to satisfy requirements listed here; behaviour that is not listed here is not part of the product.
@@ -173,6 +173,7 @@ The harness must get through a game with no human present.
 | RUN-012 | MUST | If the game process dies without the harness reporting why, report an `engine-crash` finding with the process exit code and the tail of the engine's log, then relaunch and continue with the branches that were waiting to be explored. The same applies after a hang (RUN-008). After 20 relaunches in one run, exploration stops and the report says how many branches were left. |
 | RUN-025 | MUST | The engine's *safe mode* is switched off during a run. On Windows the engine enters it whenever the Shift key is down as the game starts, which someone typing in another program can cause, and then shows a screen for choosing a renderer in place of the game. |
 | RUN-026 | MUST | The engine is started with a fixed hash seed, so that sets and dictionaries are ordered the same way on every run. Without it the engine's lint lists different unreachable statements from one run to the next. |
+| RUN-027 | MUST | Game processes start one at a time in a game folder: a process is started only when the one before it has loaded the game, and from then on they run at the same time. A game may write files of its own as it starts, script files among them, and a process that read the script while another was rewriting it would load a game with parts missing, so that what a run found would depend on timing (NFR-001). This goes for every process a run starts: the story's, those of label runs, the translation check and lint. The harness says that the game is loaded by making a file the orchestrator names; a process that ends, or is shut down, before saying so lets the next one start. The story's process is started first. Waiting for a turn ends at once when the run is stopped (CLI-006). What a game writes later, while it is played, is not covered by this, and is what the second note of SAFE-007 is about. |
 | RUN-023 | MUST | A project in development can reload itself when its script files change on disk. This is switched off during a run, because a reload restarts the game in the middle of a path. |
 | RUN-013 | SHOULD | Typical performance: at least 500 dialogue statements per second per game process on a mid-range desktop. |
 | RUN-014 | MUST | Explore several routes at the same time by running multiple game processes in parallel. `--jobs N` sets how many; the default is chosen from the number of CPU cores and available memory. `--jobs 1` is always supported. The story itself is explored by one process, because what exploration finds depends on the order it is done in (EXP-016, NFR-001); label runs, which do not depend on each other (EXP-019), are shared out between the other processes, and the engine's lint runs at the same time as both. The default is one process fewer than the computer has cores, at most 8, and no more than there is free memory for at 768 MB each. An extra process is not started for fewer than 8 labels. |
@@ -336,7 +337,7 @@ Translation testing MUST NOT multiply run time by the number of languages: check
 | DIST-002 | MUST | Single-file executable for Windows, with the harness and the graphical interface embedded. No installer, no Python needed. It is made with PyInstaller by `tools/build_exe.py`, for the system the tool is run on, and written to `dist/`. It holds the files the package lists as its data (DIST-004), taken from the same list, so that the two cannot come to differ. It has the program's icon (GUI-013). |
 | DIST-003 | SHOULD | Single-file executables for Linux and macOS. They are built and tested by the same release process as the Windows one (DIST-005), on Linux x64, macOS Intel and macOS Apple Silicon. One that does not build, or does not pass its tests, is left out of the release and does not hold it back. |
 | DIST-004 | SHOULD | Installable as a package (`pipx install`, `uv tool install`) exposing the `renpytester` command. Every file of the package that is not code is listed as its data, and a test fails when one is not. |
-| DIST-005 | MUST | Executables are built by CI from a tagged commit and attached to a GitHub release. No hand-built releases. The tag is `v` followed by the version in the source (`v0.1.0`); a tag that is anything else is refused and nothing is released. Before an executable is attached, the linters, the unit tests and the end-to-end tests (DIST-006) have passed on the system it was built on. The files are named after the system, not the version (`renpytester-windows-x64.exe`), so that a link to the latest one keeps working. |
+| DIST-005 | MUST | Executables are built by CI from a tagged commit and attached to a GitHub release. No hand-built releases. The same process can be started by hand as a rehearsal, which builds and tests everything and releases nothing. The tag is `v` followed by the version in the source (`v0.1.0`); a tag that is anything else is refused and nothing is released. Before an executable is attached, the linters, the unit tests and the end-to-end tests (DIST-006) have passed on the system it was built on. The files are named after the system, not the version (`renpytester-windows-x64.exe`), so that a link to the latest one keeps working. |
 | DIST-006 | MUST | The executable and the from-source run behave identically; the test suite's end-to-end tests run against both. With the `RENPYTESTER_EXE` environment variable naming an executable, the end-to-end tests that go through the command line start it in place of the source; those that reach into the program itself (the window's, and stopping a run at a chosen moment) cannot, and are skipped. They are run this way on the oldest and the newest supported engine. The executable does not hand its own libraries on to the programs it starts: the place it unpacked them to is taken out of the search for libraries before the game's engine is started, so that the engine loads its own. |
 
 ### 4.14 Graphical interface (GUI)
@@ -492,8 +493,8 @@ Still unverified, and the requirements that depend on them:
 1. Invisible operation on Linux and macOS (GAME-007). Confirmed on Windows only.
 2. Querying a font's glyph coverage from inside the engine (TL-008).
 3. Dropping a folder onto the open window with the standard library alone (GUI-001 has a fallback).
-4. The Linux and macOS executables (DIST-003), and the release process as a whole (DIST-005). Only the Windows executable has been built and tested, on a developer's machine; the release workflow has not run.
-5. That each Ren'Py SDK download holds the engine for every system, which the release process relies on to test on Linux and macOS.
+4. The Linux and macOS executables (DIST-003). The release process itself ran on 2026-10-07 and published the Windows executable as v0.1.0; the other three failed their tests then and were left out.
+5. That each Ren'Py SDK download holds the engine for every system, which the release process relies on to test on Linux and macOS. The first release run bore this out for Linux x64 and macOS Apple Silicon, with Ren'Py 8.6.0.
 
 ### 9.2 Decisions
 
@@ -508,6 +509,7 @@ Settled on 2026-10-06:
 | # | Decision |
 | --- | --- |
 | D21 | Version 0.17 to 0.21 amendments approved (the owner approved the spec and asked for M8). |
+| D27 | Asked for by the owner on 2026-10-07: game processes start one at a time, so that a game which writes its own files as it starts is loaded whole by each (RUN-027). Found by the first release run, where the Tutorial lost a label on Linux. |
 | D25 | Asked for by the owner: among the advanced settings the languages come first, the sandbox has a label, and the button for its copies sits under it (GUI-016, GUI-010). The SDK folder stays in plain sight for a game that needs one. |
 | D24 | Asked for by the owner: the window shows only the game at first, with the other choices behind *Show advanced settings* (GUI-016); the report folder can be chosen (GUI-011); and dialogs open centred, without a flash (GUI-017). |
 | D23 | Asked for by the owner: the window is to look modern, like the HTML report (GUI-015). The licence stays GPL-3.0. |
@@ -561,3 +563,4 @@ Settled on 2026-10-06:
 | 2026-10-06 | 0.20 | Owner's requests (D24): added GUI-016 (advanced settings behind a button) and GUI-017 (dialogs centred, shown once); GUI-011 lets the report folder be chosen; GUI-002 follows. |
 | 2026-10-06 | 0.21 | Owner's requests (D25): GUI-016 gives the order of the advanced settings, languages first; GUI-010 puts the button for the sandbox's copies under the sandbox option. |
 | 2026-10-06 | 0.22 | M8 built. D21 settled (0.17 to 0.21 approved). CLI-007 and DIST-002 to DIST-006 made precise: how the executable is built, named, tested and released, and how it tells a double click from a terminal. Two assumptions added to 9.1. |
+| 2026-10-07 | 0.23 | Owner's request (D27): added RUN-027 (game processes start one at a time). DIST-005 allows a rehearsal started by hand. Section 9.1 brought up to date with the first release run. |

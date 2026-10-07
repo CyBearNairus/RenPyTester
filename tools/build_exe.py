@@ -9,6 +9,8 @@ package (DIST-004) cannot come to differ in what they hold.
 """
 
 import argparse
+import hashlib
+import os
 import subprocess
 import sys
 import tomllib
@@ -69,6 +71,18 @@ def build():
     return DIST / (NAME + (".exe" if sys.platform == "win32" else ""))
 
 
+def summarise(built):
+    """On GitHub, puts what was built on the page of the run that built it."""
+    target = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not target:
+        return
+    digest = hashlib.sha256(built.read_bytes()).hexdigest()
+    with open(target, "a", encoding="utf-8") as page:
+        page.write("### Executable built\n\n| File | Version | Size | SHA-256 |\n| --- | --- | --- | --- |\n")
+        page.write("| `%s` | %s | %.1f MB | `%s` |\n\n" % (
+            built.name, version(), built.stat().st_size / 1024 ** 2, digest))
+
+
 def main(argv):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--tag", help="check that this is the tag of the version in the source, and build nothing")
@@ -80,7 +94,9 @@ def main(argv):
             return 1
         print("Tag %s matches the version." % args.tag)
         return 0
-    print("Built %s" % build())
+    built = build()
+    print("Built %s" % built)
+    summarise(built)
     return 0
 
 

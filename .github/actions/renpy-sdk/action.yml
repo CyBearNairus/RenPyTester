@@ -1,0 +1,58 @@
+# Puts the Ren'Py SDKs the end-to-end tests need under .cache/sdk, from the cache when it has them.
+#
+# A cache can be read by the branch that made it and by anything started from the default branch's
+# commits, tags included, only when the default branch made it. So the cache that counts is the one
+# the CI workflow saves on main; a release then finds it and downloads nothing.
+# It is saved as soon as the SDKs are downloaded, not at the end of the job, so that a job whose
+# tests fail still leaves it for the next one.
+name: Ren'Py SDKs
+description: Restores the Ren'Py SDKs from the cache, or downloads them and saves them there.
+
+inputs:
+  versions:
+    description: The SDK versions wanted, separated by spaces.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Look for the SDKs in the cache
+      id: cache
+      uses: actions/cache/restore@v6
+      with:
+        path: .cache/sdk
+        key: renpy-sdk-${{ runner.os }}-${{ inputs.versions }}
+
+    - name: Download the SDKs
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        VERSIONS: ${{ inputs.versions }}
+      run: |
+        mkdir -p .cache/sdk
+        for version in $VERSIONS; do
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            curl -fsSL --retry 3 -o sdk.zip "https://www.renpy.org/dl/$version/renpy-$version-sdk.zip"
+            unzip -q sdk.zip -d .cache/sdk
+            rm sdk.zip
+          else
+            curl -fsSL --retry 3 "https://www.renpy.org/dl/$version/renpy-$version-sdk.tar.bz2" | tar -xj -C .cache/sdk
+          fi
+        done
+
+    - name: Save the SDKs in the cache
+      if: steps.cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: .cache/sdk
+        key: renpy-sdk-${{ runner.os }}-${{ inputs.versions }}
+
+    - name: Say where the SDKs came from
+      shell: bash
+      env:
+        VERSIONS: ${{ inputs.versions }}
+        HIT: ${{ steps.cache.outputs.cache-hit }}
+      run: |
+        if [ "$HIT" = "true" ]; then from="restored from the cache"; else from="downloaded from renpy.org, and saved in the cache"; fi
+        echo "**Ren'Py SDKs** ($VERSIONS): $from, $(du -sm .cache/sdk | cut -f1) MB." >> "$GITHUB_STEP_SUMMARY"
+        echo >> "$GITHUB_STEP_SUMMARY"

@@ -28,7 +28,8 @@ A game whose own script writes into its folder is told so in the report.
 What to check, the languages, the sandbox and the report folder are *advanced settings*, one click away.
 The window has the program's own icon, lists its languages by name, and has an *About* dialog with the version, the author and the repository.
 `python tools/build_exe.py` makes the single-file executable, `dist/renpytester.exe` on Windows, which is the same program with Python inside it.
-Pushing a tag such as `v0.1.0` has GitHub build it, test it and attach it to a release; that workflow has not run yet, and the Linux and macOS executables have never been built.
+Pushing a tag such as `v0.1.0` has GitHub build it, test it and attach it to a release.
+v0.1.0 was released that way with the Windows executable only; the Linux and macOS ones have not yet passed their tests.
 Engine facts and hooks are recorded in [docs/SPIKES.md](docs/SPIKES.md): read it before touching the harness.
 `spikes/` holds the throwaway M0 experiments; never import from it.
 
@@ -112,6 +113,10 @@ The ones that cause real damage if forgotten:
 - **Results must not depend on `--jobs` or on timing.**
   Only work whose result does not depend on order may be given to another process: label runs and lint, never part of the story's exploration.
   Findings are collected and put into the report in a fixed order when everything has finished, and everything a label run keeps in memory is reset when it starts.
+- **Game processes start one at a time, and only then run together.**
+  A game can rewrite its own script files as it starts (the Tutorial does), and a process that reads the script meanwhile loads a game with labels missing.
+  `launcher.Startup` holds each new process back until the one before it has made its `RENPYTESTER_LOADED` file, which the harness does at the end of its `init 999` block.
+  Every engine launch goes through `run_engine` or `run_command`, which do this; a launch made any other way brings the race back.
 - **Game processes run at the same time, in the same game folder.**
   Each gets its own work folder (events, saves) and log folder; nothing in the game folder may be written by more than one.
   The engine's own second save location, `game/saves`, is switched off by the harness for that reason.
@@ -209,5 +214,8 @@ Paths to these come from environment variables.
 - `renpytester/harness/zzz_renpytester_harness.rpy`: the script injected into the game.
 - `tests/fixtures/games/`: one small game per behaviour under test. A new finding class needs a new fixture.
 - `tools/`: development tools. `build_exe.py` builds the executable, `make_icon.py` draws the icon, `lint_rpy.py` lints Ren'Py scripts.
-- `.github/workflows/`: `ci.yml` runs the linters and unit tests on every push; `release.yml` builds and publishes the executables from a tag.
+- `.github/workflows/`: `ci.yml` runs the linters, the unit tests and the end-to-end tests from source on every push; `release.yml` builds and publishes the executables from a tag, or rehearses that when started by hand.
+  `.github/actions/renpy-sdk` gets the SDKs for both, from the cache when it can.
+  A cache is only of use to later runs when a run on `main` saved it, which is why CI does.
+  Each job writes what it did to the run's summary page: `tests/conftest.py` does that for every pytest run, `tools/build_exe.py` for the build.
 - `docs/report-schema.md`: the JSON report format. Update it with any change to `model.py`.

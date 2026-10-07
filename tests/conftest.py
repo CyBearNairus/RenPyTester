@@ -6,7 +6,9 @@ the newest one unpacked under .cache/sdk/. Without one, those tests are skipped.
 
 import hashlib
 import os
+import platform
 import shutil
+import time
 from pathlib import Path
 
 import pytest
@@ -91,3 +93,42 @@ def pytest_runtest_makereport(item, call):
     for report_file in Path(tmp_path).rglob("report-*.json"):
         target.mkdir(parents=True, exist_ok=True)
         shutil.copy(report_file, target / report_file.name)
+
+
+def pytest_sessionstart(session):
+    session.config.renpytester_started = time.monotonic()
+
+
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    """On GitHub, puts the result of this test run on the page of the workflow run."""
+    target = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not target:
+        return
+
+    def tests(kind):
+        return [r for r in terminalreporter.stats.get(kind, []) if hasattr(r, "nodeid")]
+
+    def cell(text):
+        return str(text).replace("|", "&#124;").replace("\n", " ")[:300]
+
+    what = " ".join(config.invocation_params.args) or "everything"
+    sdk_path = find_sdk()
+    about = [
+        "the executable" if os.environ.get("RENPYTESTER_EXE") else "from source",
+        "Ren'Py SDK %s" % sdk_path.name.split("-")[1] if sdk_path and "tests/unit" not in what else None,
+        "Python %s" % platform.python_version(), platform.platform(terse=True)]
+    counts = [len(tests(kind)) for kind in ("passed", "failed", "error", "skipped")]
+    seconds = int(time.monotonic() - getattr(config, "renpytester_started", time.monotonic()))
+    lines = [
+        "### %s Tests: `%s`" % ("\u2705" if exitstatus == 0 else "\u274c", what), "",
+        ", ".join(part for part in about if part) + ".", "",
+        "| Passed | Failed | Errors | Skipped | Time |", "| --- | --- | --- | --- | --- |",
+        "| %d | %d | %d | %d | %d min %02d s |" % (*counts, seconds // 60, seconds % 60)]
+    broken = tests("failed") + tests("error")
+    if broken:
+        lines += ["", "| Failed test | Why |", "| --- | --- |"]
+        for report in broken:
+            crash = getattr(getattr(report, "longrepr", None), "reprcrash", None)
+            lines.append("| `%s` | %s |" % (cell(report.nodeid), cell(crash.message if crash else "")))
+    with open(target, "a", encoding="utf-8") as page:
+        page.write("\n".join(lines) + "\n\n")

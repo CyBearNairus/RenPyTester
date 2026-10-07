@@ -1,10 +1,15 @@
 import os
 import subprocess
+import sys
+import threading
+import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from renpytester.launcher import MAX_DEFAULT_JOBS, SILENT_EDITOR, build_environment, default_jobs
+from renpytester.launcher import (
+    MAX_DEFAULT_JOBS, SILENT_EDITOR, Startup, build_environment, default_jobs, run_command, run_engine)
 
 
 @pytest.fixture
@@ -66,3 +71,81 @@ def test_default_number_of_game_processes_follows_cores_and_free_memory():
     assert default_jobs(cpus=8, memory=2 * 1024 ** 3) == 2
     assert default_jobs(cpus=8, memory=1024) == 1
     assert default_jobs() >= 1
+
+
+# Stands in for the engine: says when it started, takes a while to "load the game", says so the way
+# the harness does, and then works for a while longer.
+STAND_IN = """
+import json, os, sys, time
+record = os.path.join(sys.argv[1], "record-%d.json" % os.getpid())
+times = {"start": time.time()}
+time.sleep(0.4)
+if "--never-loads" not in sys.argv:
+    times["loaded"] = time.time()
+    open(os.environ["RENPYTESTER_LOADED"], "w").close()
+    time.sleep(0.6)
+times["end"] = time.time()
+with open(record, "w") as out:
+    json.dump(times, out)
+"""
+
+
+@pytest.fixture
+def stand_in(tmp_path):
+    script = tmp_path / "stand_in.py"
+    script.write_text(STAND_IN, encoding="utf-8")
+    (tmp_path / "game").mkdir()
+    return SimpleNamespace(python=sys.executable, main_script=script, basedir=tmp_path / "game")
+
+
+def records(game):
+    import json
+
+    return sorted(
+        (json.loads(path.read_text()) for path in game.basedir.glob("record-*.json")), key=lambda r: r["start"])
+
+
+@pytest.mark.req("RUN-027")
+def test_game_processes_start_one_at_a_time_and_then_run_together(stand_in, tmp_path):
+    def play(number):
+        run_engine(stand_in, "run", tmp_path / ("work-%d" % number), tmp_path / ("logs-%d" % number), {}, 30)
+
+    def lint():
+        run_command(stand_in, "lint", [], tmp_path / "work-lint", tmp_path / "logs-lint", 30)
+
+    (tmp_path / "work-lint").mkdir()
+    (tmp_path / "logs-lint").mkdir()
+    threads = [threading.Thread(target=play, args=(number,)) for number in range(2)] + [threading.Thread(target=lint)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    first, second, third = records(stand_in)
+    # None starts before the one before it has loaded the game...
+    assert second["start"] >= first["loaded"] and third["start"] >= second["loaded"]
+    # ...and none waits for the one before it to finish.
+    assert second["start"] < first["end"] and third["start"] < second["end"]
+
+
+@pytest.mark.req("RUN-027")
+def test_process_that_dies_before_loading_the_game_lets_the_next_one_start(stand_in, tmp_path):
+    code, _output = run_command(stand_in, "lint", ["--never-loads"], tmp_path, tmp_path, 30)
+    assert code == 0
+    started = time.monotonic()
+    assert Startup(stand_in, tmp_path, "run").enter() is True
+    assert time.monotonic() - started < 1
+
+
+@pytest.mark.req("RUN-027", "CLI-006")
+def test_waiting_for_a_turn_to_start_ends_when_the_run_is_stopped(stand_in, tmp_path):
+    first = Startup(stand_in, tmp_path, "run")
+    assert first.enter() is True
+    stop = threading.Event()
+    threading.Timer(0.3, stop.set).start()
+    try:
+        result = run_engine(stand_in, "run", tmp_path / "work", tmp_path / "logs", {}, 30, cancel=stop)
+        assert result.cancelled is True
+        assert records(stand_in) == []  # It was never started.
+    finally:
+        first.leave()

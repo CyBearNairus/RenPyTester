@@ -2,8 +2,8 @@
 #
 # This file is copied into a game's game/ folder for the duration of a test run and removed
 # afterwards. If you find it in your game and no test is running, it is safe to delete.
-# It does nothing unless RenPyTester started the game: it looks for the RENPYTESTER_EVENTS and
-# RENPYTESTER_SETTINGS environment variables.
+# It does nothing unless RenPyTester started the game: it looks for the RENPYTESTER_EVENTS,
+# RENPYTESTER_SETTINGS and RENPYTESTER_LOADED environment variables.
 #
 # It runs on the Python embedded in the game's engine, which can be as old as 3.9, and may only use
 # the standard library and the Ren'Py API (spec ARCH-001).
@@ -1463,3 +1463,7 @@ init 999 python hide:
         _renpytester_no_safe_mode()
     if _renpytester_os.environ.get("RENPYTESTER_EVENTS"):
         _renpytester_install()
+    if _renpytester_os.environ.get("RENPYTESTER_LOADED"):
+        # The script is loaded and the game has done what it does as it starts: the next game
+        # process may now start in this folder (spec RUN-027).
+        open(_renpytester_os.environ["RENPYTESTER_LOADED"], "w").close()

@@ -338,6 +338,8 @@ def run_in(options, basedir, original, known, on_progress, stop=None):
                 # Lint and the translation check read the script while the game is being played, unless
                 # only one process may run.
                 if options.jobs > 1:
+                    # They start one after another (RUN-027); the story's process goes first.
+                    jobs.sort(key=lambda job: job[0] is not explore_routes)
                     in_parallel(jobs, lambda function, arguments: function(*arguments), cancel)
                 else:
                     for function, arguments in jobs:

@@ -23,20 +23,37 @@ env:
 
 jobs:
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - if: github.ref_type == 'tag'
-        run: python tools/build_exe.py --tag "$GITHUB_REF_NAME"
+      - name: The tag is this version's
+        if: github.ref_type == 'tag'
+        shell: bash
+        run: python tools/build_exe.py --tag "$GITHUB_REF_NAME" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Say that this is a rehearsal
+        if: github.ref_type != 'tag'
+        run: echo "**Rehearsal**, started by hand on \`$GITHUB_REF_NAME\`. Nothing is released." >> "$GITHUB_STEP_SUMMARY"
       - run: python -m pip install flake8
-      - run: python -m flake8 .
-      - run: python tools/lint_rpy.py
-      - run: npx --yes markdownlint-cli2 "**/*.md"
+      - name: Python (flake8)
+        run: |
+          python -m flake8 .
+          echo "- Python (flake8): no problems" >> "$GITHUB_STEP_SUMMARY"
+      - name: Ren'Py scripts (tools/lint_rpy.py)
+        run: |
+          python tools/lint_rpy.py
+          echo "- Ren'Py scripts (tools/lint_rpy.py): no problems" >> "$GITHUB_STEP_SUMMARY"
+      - name: Markdown (markdownlint)
+        run: |
+          npx --yes markdownlint-cli2 "**/*.md"
+          echo "- Markdown (markdownlint): no problems" >> "$GITHUB_STEP_SUMMARY"
+      - if: failure()
+        run: echo "- **A check failed.** Its step's log says why." >> "$GITHUB_STEP_SUMMARY"
 
   build:
+    name: build (${{ matrix.asset }})
     runs-on: ${{ matrix.os }}
     continue-on-error: ${{ !matrix.required }}
     strategy:
@@ -60,34 +77,20 @@ jobs:
             built: dist/renpytester
             asset: renpytester-macos-x64
             required: false
+    defaults:
+      run:
+        shell: bash
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - run: python -m pip install pytest pyinstaller
 
-      # The engine is downloaded for the tests and never committed or put in the executable (NFR-006).
-      - name: Keep the Ren'Py SDKs between runs
-        id: sdk
-        uses: actions/cache@v4
+      # The engine is fetched for the tests and never committed or put in the executable (NFR-006).
+      - uses: ./.github/actions/renpy-sdk
         with:
-          path: .cache/sdk
-          key: renpy-sdk-${{ runner.os }}-${{ env.RENPY_NEWEST }}-${{ env.RENPY_OLDEST }}
-      - name: Download the Ren'Py SDKs
-        if: steps.sdk.outputs.cache-hit != 'true'
-        shell: bash
-        run: |
-          mkdir -p .cache/sdk
-          for version in "$RENPY_NEWEST" "$RENPY_OLDEST"; do
-            if [ "$RUNNER_OS" = "Windows" ]; then
-              curl -fsSL -o sdk.zip "https://www.renpy.org/dl/$version/renpy-$version-sdk.zip"
-              unzip -q sdk.zip -d .cache/sdk
-              rm sdk.zip
-            else
-              curl -fsSL "https://www.renpy.org/dl/$version/renpy-$version-sdk.tar.bz2" | tar -xj -C .cache/sdk
-            fi
-          done
+          versions: ${{ env.RENPY_NEWEST }} ${{ env.RENPY_OLDEST }}
 
       - name: Unit tests
         run: python -m pytest tests/unit
@@ -98,28 +101,29 @@ jobs:
         run: python tools/build_exe.py
 
       - name: End-to-end tests, the executable, newest Ren'Py
-        shell: bash
         run: RENPYTESTER_EXE="$PWD/${{ matrix.built }}" python -m pytest tests/e2e
       - name: End-to-end tests, the executable, oldest Ren'Py
-        shell: bash
         run: >
           RENPYTESTER_EXE="$PWD/${{ matrix.built }}" RENPY_SDK="$PWD/.cache/sdk/renpy-$RENPY_OLDEST-sdk"
           python -m pytest tests/e2e
 
       - name: Keep the logs of failed tests
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: failures-${{ matrix.asset }}
           path: .cache/failures
+          include-hidden-files: true
           if-no-files-found: ignore
+      - name: Say that this executable is left out
+        if: failure() && !matrix.required
+        run: echo "**${{ matrix.asset }} did not pass and is left out of the release.**" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Name the executable for the release
-        shell: bash
         run: |
           mkdir release
           cp "${{ matrix.built }}" "release/${{ matrix.asset }}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.asset }}
           path: release/${{ matrix.asset }}
@@ -128,11 +132,11 @@ jobs:
   publish:
     if: github.ref_type == 'tag'
     needs: [lint, build]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: release
           pattern: renpytester-*
@@ -145,3 +149,18 @@ jobs:
           --repo "$GITHUB_REPOSITORY"
           --title "RenPyTester $GITHUB_REF_NAME"
           --generate-notes --verify-tag
+      - name: Say what was released
+        run: |
+          {
+            echo "## Released [$GITHUB_REF_NAME]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$GITHUB_REF_NAME)"
+            echo
+            echo "| File | Size | SHA-256 |"
+            echo "| --- | --- | --- |"
+            for file in release/*; do
+              echo "| \`$(basename "$file")\` | $(du -k "$file" | cut -f1) KB | \`$(sha256sum "$file" | cut -d' ' -f1)\` |"
+            done
+            echo
+            for name in renpytester-linux-x64 renpytester-macos-arm64 renpytester-macos-x64; do
+              [ -e "release/$name" ] || echo "- \`$name\` did not pass its tests and was left out."
+            done
+          } >> "$GITHUB_STEP_SUMMARY"

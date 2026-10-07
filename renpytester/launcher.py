@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -38,6 +39,46 @@ def leave_bundle(environ=None):
             environ.pop("LD_LIBRARY_PATH", None)
         else:
             environ["LD_LIBRARY_PATH"] = original
+
+
+_gates = {}
+_gates_lock = threading.Lock()
+
+
+class Startup:
+    """Lets one process at a time start in a game folder (RUN-027).
+
+    A game may write files of its own as it starts, script files among them, and a process that
+    reads the script while another is rewriting it loads a game with parts missing. So a process is
+    started only when the one before it has loaded the game, which the harness says by making the
+    file named in RENPYTESTER_LOADED. After that they run at the same time.
+    """
+
+    def __init__(self, game, work_dir, command):
+        key = os.path.normcase(os.path.abspath(str(game.basedir)))
+        with _gates_lock:
+            self.gate = _gates.setdefault(key, threading.Lock())
+        self.marker = Path(work_dir) / ("loaded-%s" % command)
+        self.held = False
+
+    def enter(self, cancel=None):
+        """Waits for its turn. Returns False when the run was stopped while waiting."""
+        self.marker.unlink(missing_ok=True)
+        while not self.gate.acquire(timeout=0.05):
+            if cancel is not None and cancel.is_set():
+                return False
+        self.held = True
+        return True
+
+    def check(self):
+        """Lets the next process start once this one has loaded the game."""
+        if self.held and self.marker.exists():
+            self.leave()
+
+    def leave(self):
+        if self.held:
+            self.held = False
+            self.gate.release()
 
 
 @dataclass
@@ -90,9 +131,13 @@ def default_jobs(cpus=None, memory=None):
     return jobs
 
 
-def build_environment(events_file, settings, log_dir, show_window=False):
+def build_environment(events_file, settings, log_dir, show_window=False, loaded=None):
     env = dict(os.environ)
     env["RENPYTESTER_EVENTS"] = str(events_file)
+    env.pop("RENPYTESTER_LOADED", None)
+    if loaded is not None:
+        # The harness makes this file when the game has been loaded (RUN-027).
+        env["RENPYTESTER_LOADED"] = str(loaded)
     # A file, not the value itself: a list of branches to resume can be too long for an environment variable.
     settings_file = Path(events_file).with_suffix(".settings.json")
     settings_file.write_text(json.dumps(settings), encoding="utf-8")
@@ -157,17 +202,27 @@ def run_engine(game, command, work_dir, log_dir, settings, timeout, on_event=Non
     # Saves and persistent data go to a throwaway folder, never the player's own (SAFE-004).
     saves = str(work_dir / "saves")
     cmd = [str(game.python), str(game.main_script), str(game.basedir), command, "--savedir", saves]
-    env = build_environment(events_file, settings, log_dir, show_window)
+    startup = Startup(game, work_dir, command)
+    env = build_environment(events_file, settings, log_dir, show_window, startup.marker)
     flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
     result = EngineRun()
+    if not startup.enter(cancel):
+        result.cancelled = True
+        return result
     with open(output_file, "w", encoding="utf-8", errors="replace") as output:
-        process = subprocess.Popen(
-            cmd, env=env, stdout=output, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, creationflags=flags)
+        try:
+            process = subprocess.Popen(
+                cmd, env=env, stdout=output, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                creationflags=flags)
+        except BaseException:
+            startup.leave()
+            raise
         try:
             with open(events_file, "r", encoding="utf-8") as handle:
                 last_activity = time.monotonic()
                 while True:
+                    startup.check()
                     before = len(result.events)
                     if read_new_events(handle, result.events):
                         last_activity = time.monotonic()
@@ -192,6 +247,7 @@ def run_engine(game, command, work_dir, log_dir, settings, timeout, on_event=Non
             if process.poll() is None:
                 process.kill()
             process.wait()
+            startup.leave()
 
     result.exit_code = process.returncode
     result.output = output_file.read_text(encoding="utf-8", errors="replace")
@@ -210,7 +266,8 @@ def run_command(game, command, arguments, work_dir, log_dir, timeout, cancel=Non
     """
     work_dir = Path(work_dir)
     log_dir = Path(log_dir)
-    env = build_environment(work_dir / "unused.jsonl", {}, log_dir)
+    startup = Startup(game, work_dir, command)
+    env = build_environment(work_dir / "unused.jsonl", {}, log_dir, loaded=startup.marker)
     del env["RENPYTESTER_EVENTS"]
 
     # A folder of its own: lint may run while the game is being played (RUN-015).
@@ -219,12 +276,20 @@ def run_command(game, command, arguments, work_dir, log_dir, timeout, cancel=Non
     flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
     output_file = log_dir / ("output-%s.txt" % command)
     code = None
+    if not startup.enter(cancel):
+        return None, ""
     with open(output_file, "wb") as output:
-        process = subprocess.Popen(
-            cmd, env=env, stdout=output, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, creationflags=flags)
+        try:
+            process = subprocess.Popen(
+                cmd, env=env, stdout=output, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                creationflags=flags)
+        except BaseException:
+            startup.leave()
+            raise
         try:
             started = time.monotonic()
             while time.monotonic() - started <= timeout and not (cancel is not None and cancel.is_set()):
+                startup.check()
                 try:
                     code = process.wait(0.05)
                     break
@@ -234,4 +299,5 @@ def run_command(game, command, arguments, work_dir, log_dir, timeout, cancel=Non
             if process.poll() is None:
                 process.kill()
             process.wait()
+            startup.leave()
     return code, output_file.read_text(encoding="utf-8", errors="replace")

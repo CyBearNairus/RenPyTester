@@ -600,6 +600,20 @@ def test_several_game_processes_give_the_same_report_as_one(sdk, tmp_path, capsy
     assert comparable(reports[1]) == comparable(reports[3])
 
 
+@pytest.mark.req("RUN-027", "NFR-001")
+def test_game_that_rewrites_its_script_as_it_starts_is_loaded_whole_by_every_process(run):
+    # Started together, one process would read the file another has emptied, and lose a label.
+    code, report, _text, _game = run("writes_script", "--jobs", "3")
+    assert code == 0
+    assert report["findings"] == []
+    assert report["coverage"]["executed"] == report["coverage"]["total"] == 9
+    assert report["stages"]["routes"]["jobs"] == 2 and report["stages"]["lint"]["status"] == "done"
+    # One start for finding out what the game is, then the story's process, the one for label runs, and
+    # lint, which an older engine has to be started twice for.
+    starts = report["game_wrote"]["created"]
+    assert len(starts) >= 4 and starts == ["game/start-%d.txt" % number for number in range(len(starts))]
+
+
 @pytest.mark.req("RUN-014", "EXP-011", "EXP-012")
 def test_label_runs_in_a_process_of_their_own_are_resolved_the_same_way(run):
     _code, alone, _text, _game = run("labels")
