@@ -21,11 +21,11 @@ import traceback
 import webbrowser
 from pathlib import Path
 
-from renpytester import __author__, __url__, __version__, discovery, i18n, runner, sandbox
+from renpytester import __author__, __url__, __version__, discovery, i18n, palette, runner, sandbox
 from renpytester import report as reports
 from renpytester.errors import ToolError
 from renpytester.i18n import t
-from renpytester.model import ERROR, WARNING
+from renpytester.model import ERROR, INFO, WARNING
 
 # Where the window keeps the last game and choices, when not in the usual place (GUI-008).
 STATE_VARIABLE = "RENPYTESTER_GUI_STATE"
@@ -35,6 +35,9 @@ ICON_SIZES = (16, 32, 48, 256)
 # What Windows files the program's windows under on the taskbar. Without a name of its own, a
 # program run by Python is filed under Python, and shown with Python's icon.
 TASKBAR_NAME = "CyBearNairus.RenPyTester"
+# What the window keeps sums of: the three severities, and possible issues, which are counted apart.
+POSSIBLE = "possible"
+COUNTED = (ERROR, WARNING, INFO, POSSIBLE)
 
 
 def language_name(code):
@@ -257,12 +260,206 @@ def open_folder(path):
         subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", str(path)])
 
 
+def make_sharp():
+    """Asks Windows to let the program draw at the screen's real resolution. Without this, on a
+    screen set to show things larger, Windows stretches the window like a picture, and it blurs."""
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            ctypes.windll.shcore.SetProcessDpiAwareness(1)
+        except Exception:
+            pass  # An older Windows, or already set; the window still opens.
+
+
+def dark_title_bar(window):
+    """Has Windows draw the window's own frame dark, to go with dark contents."""
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            window.update_idletasks()
+            frame = int(window.wm_frame(), 16)
+            value = ctypes.c_int(1)
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(frame, 20, ctypes.byref(value), ctypes.sizeof(value))
+        except Exception:
+            pass
+
+
+def blend(colours):
+    """The average of some "#rrggbb" colours, as one."""
+    parts = [[int(colour[i:i + 2], 16) for i in (1, 3, 5)] for colour in colours]
+    return "#%02x%02x%02x" % tuple(round(sum(part[i] for part in parts) / len(parts)) for i in range(3))
+
+
+def tick_box(root, size, margin, around, edge, fill, tick=None):
+    """A picture of a tick box, `size` pixels across with `margin` empty pixels after it.
+
+    Tk can only colour whole pixels, so each one is given the average of what a sharper drawing
+    would have under it; that is what makes the round corners and the tick look smooth.
+    """
+    import tkinter
+
+    fine = 4
+    radius, line = 0.2, 0.07
+    stroke = [((0.24, 0.53), (0.43, 0.71)), ((0.43, 0.71), (0.78, 0.31))]
+
+    def near_stroke(x, y):
+        for (ax, ay), (bx, by) in stroke:
+            dx, dy = bx - ax, by - ay
+            along = max(0.0, min(1.0, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy)))
+            if (x - ax - along * dx) ** 2 + (y - ay - along * dy) ** 2 <= 0.075 ** 2:
+                return True
+        return False
+
+    def colour_at(x, y):
+        # How far inside the rounded square the point is; negative is outside.
+        qx, qy = abs(x - 0.5) - (0.5 - radius), abs(y - 0.5) - (0.5 - radius)
+        outside = (max(qx, 0) ** 2 + max(qy, 0) ** 2) ** 0.5 + min(max(qx, qy), 0) - radius
+        if outside > 0:
+            return around
+        if tick and near_stroke(x, y):
+            return tick
+        return edge if outside > -line else fill
+
+    rows = []
+    for py in range(size):
+        row = []
+        for px_ in range(size + margin):
+            if px_ >= size:
+                row.append(around)
+                continue
+            samples = [
+                colour_at((px_ + (i + 0.5) / fine) / size, (py + (j + 0.5) / fine) / size)
+                for i in range(fine) for j in range(fine)]
+            row.append(blend(samples))
+        rows.append("{" + " ".join(row) + "}")
+    image = tkinter.PhotoImage(master=root, width=size + margin, height=size)
+    image.put(" ".join(rows))
+    return image
+
+
+def apply_theme(root, colours, px):
+    """Dresses Tk's widgets in the colours of the HTML report (GUI-015).
+
+    `px` turns a size in pixels into what it should be on this screen. Everything is done with the
+    styles Tk itself has and a few small pictures drawn here; there is no extra library behind the
+    look. Returns those pictures, which must be kept for as long as the window is open.
+    """
+    from tkinter import font as fonts
+    from tkinter import ttk
+
+    c = colours
+    for name in ("TkDefaultFont", "TkTextFont", "TkHeadingFont", "TkMenuFont"):
+        try:
+            fonts.nametofont(name, root=root).configure(size=10)
+        except Exception:
+            pass
+
+    style = ttk.Style(root)
+    style.theme_use("clam")  # The one built-in theme whose every colour can be set, on every system.
+    root.configure(background=c["page"])
+    style.configure(
+        ".", background=c["card"], foreground=c["ink"], bordercolor=c["line"], lightcolor=c["card"],
+        darkcolor=c["card"], troughcolor=c["line"], focuscolor=c["accent"], selectbackground=c["accent"],
+        selectforeground=c["accent-ink"], insertcolor=c["ink"])
+    style.configure("Page.TFrame", background=c["page"])
+    style.configure("Page.TLabel", background=c["page"], foreground=c["soft"])
+    style.configure("Soft.TLabel", foreground=c["soft"])
+    style.configure("Problem.TLabel", foreground=c["error"])
+    style.configure("Title.TLabel", font=("TkDefaultFont", 14, "bold"))
+    for kind in ("error", "warning", "info", "possible"):
+        style.configure(kind + ".Count.TLabel", foreground=c[kind], font=("TkDefaultFont", 18, "bold"))
+
+    style.configure(
+        "TButton", background=c["card"], foreground=c["ink"], bordercolor=c["line"], lightcolor=c["card"],
+        darkcolor=c["card"], relief="raised", borderwidth=1, padding=(px(12), px(5)), focuscolor=c["card"])
+    style.map(
+        "TButton", background=[("disabled", c["card"]), ("pressed", c["line"]), ("active", c["page"])],
+        foreground=[("disabled", c["soft"])], bordercolor=[("focus", c["accent"])],
+        lightcolor=[("pressed", c["line"]), ("active", c["page"])],
+        darkcolor=[("pressed", c["line"]), ("active", c["page"])])
+    style.configure(
+        "Accent.TButton", background=c["accent"], foreground=c["accent-ink"], bordercolor=c["accent"],
+        lightcolor=c["accent"], darkcolor=c["accent"], focuscolor=c["accent"], padding=(px(22), px(9)),
+        font=("TkDefaultFont", 10, "bold"))
+    style.map(
+        "Accent.TButton",
+        background=[("disabled", c["line"]), ("pressed", c["accent-hover"]), ("active", c["accent-hover"])],
+        foreground=[("disabled", c["soft"])],
+        bordercolor=[("disabled", c["line"])], lightcolor=[("disabled", c["line"]), ("active", c["accent-hover"])],
+        darkcolor=[("disabled", c["line"]), ("active", c["accent-hover"])])
+    style.configure("Page.TButton", background=c["page"], lightcolor=c["page"], darkcolor=c["page"])
+    style.map(
+        "Page.TButton", background=[("disabled", c["page"]), ("pressed", c["line"]), ("active", c["card"])],
+        lightcolor=[("pressed", c["line"]), ("active", c["card"])],
+        darkcolor=[("pressed", c["line"]), ("active", c["card"])])
+
+    style.configure(
+        "TEntry", fieldbackground=c["card"], foreground=c["ink"], bordercolor=c["line"], lightcolor=c["card"],
+        darkcolor=c["card"], padding=px(5))
+    style.map(
+        "TEntry", bordercolor=[("focus", c["accent"])], lightcolor=[("focus", c["accent"])],
+        fieldbackground=[("readonly", c["code"]), ("disabled", c["page"])], foreground=[("disabled", c["soft"])])
+    style.configure(
+        "TCombobox", fieldbackground=c["card"], background=c["card"], foreground=c["ink"], arrowcolor=c["soft"],
+        bordercolor=c["line"], lightcolor=c["card"], darkcolor=c["card"], padding=px(4))
+    style.map(
+        "TCombobox", fieldbackground=[("readonly", c["card"]), ("disabled", c["page"])],
+        foreground=[("disabled", c["soft"])], selectbackground=[("readonly", c["card"])],
+        selectforeground=[("readonly", c["ink"])], bordercolor=[("focus", c["accent"])])
+    for option, value in (("background", c["card"]), ("foreground", c["ink"]),
+                          ("selectBackground", c["accent"]), ("selectForeground", c["accent-ink"])):
+        root.option_add("*TCombobox*Listbox." + option, value)
+
+    # Tick boxes: the theme's own show a cross when ticked, so the boxes are drawn here.
+    size, gap = px(16), px(7)
+    boxes = {
+        "empty": tick_box(root, size, gap, c["card"], c["soft"], c["card"]),
+        "ticked": tick_box(root, size, gap, c["card"], c["accent"], c["accent"], c["accent-ink"]),
+        "empty-off": tick_box(root, size, gap, c["card"], c["line"], c["page"]),
+        "ticked-off": tick_box(root, size, gap, c["card"], c["line"], c["line"], c["soft"]),
+    }
+    try:
+        style.element_create(
+            "Tick.indicator", "image", boxes["empty"], ("disabled", "selected", boxes["ticked-off"]),
+            ("disabled", boxes["empty-off"]), ("selected", boxes["ticked"]), sticky="w")
+        style.layout("TCheckbutton", [("Checkbutton.padding", {"sticky": "nswe", "children": [
+            ("Tick.indicator", {"side": "left", "sticky": ""}),
+            ("Checkbutton.focus", {"side": "left", "sticky": "w", "children": [
+                ("Checkbutton.label", {"sticky": "nswe"})]})]})])
+    except Exception:
+        pass  # Made already for this Tk; or it will not have them, and the theme's own boxes stay.
+    style.configure(
+        "TCheckbutton", background=c["card"], foreground=c["ink"], focuscolor=c["card"], padding=(0, px(3)))
+    style.map("TCheckbutton", background=[("active", c["card"])], foreground=[("disabled", c["soft"])])
+
+    style.configure(
+        "Horizontal.TProgressbar", troughcolor=c["line"], background=c["accent"], bordercolor=c["line"],
+        lightcolor=c["accent"], darkcolor=c["accent"], thickness=px(8))
+    style.configure(
+        "Treeview", background=c["card"], fieldbackground=c["card"], foreground=c["ink"], bordercolor=c["line"],
+        lightcolor=c["card"], darkcolor=c["card"], rowheight=px(28), relief="flat")
+    style.map(
+        "Treeview", background=[("selected", c["accent-soft"])], foreground=[("selected", c["ink"])])
+    style.configure(
+        "Treeview.Heading", background=c["card"], foreground=c["soft"], bordercolor=c["line"],
+        lightcolor=c["card"], darkcolor=c["card"], relief="flat", padding=(px(6), px(6)),
+        font=("TkDefaultFont", 9, "bold"))
+    style.map("Treeview.Heading", background=[("active", c["page"])])
+    style.configure(
+        "Vertical.TScrollbar", background=c["line"], troughcolor=c["card"], bordercolor=c["card"],
+        lightcolor=c["line"], darkcolor=c["line"], arrowcolor=c["soft"], gripcount=0)
+    style.map("Vertical.TScrollbar", background=[("active", c["soft"])])
+    return list(boxes.values())
+
+
 class Window:
     """The widgets. Everything slow happens in the session's threads; this only shows and asks."""
 
     PAD = 8
 
-    def __init__(self, root, session):
+    def __init__(self, root, session, dark=None):
         import tkinter as tk
         from tkinter import ttk
 
@@ -276,10 +473,18 @@ class Window:
         self.needs_sdk = False
         self.paths = None
         self.closing = False
-        self.counts = {ERROR: 0, WARNING: 0}
+        self.counts = dict.fromkeys(COUNTED, 0)
         self.result = None
         self.status_key = None
         self.icons = load_icons(root)
+        # Dark or light, as the system is set (GUI-015). The window keeps the one it opened with.
+        self.dark = palette.system_is_dark() if dark is None else dark
+        self.colours = palette.DARK if self.dark else palette.LIGHT
+        # How much larger than usual this screen shows things.
+        self.scale = max(root.winfo_fpixels("1i") / 96.0, 1.0)
+        self.pictures = apply_theme(root, self.colours, self.px)
+        if self.dark:
+            dark_title_bar(root)
 
         self.game_var = tk.StringVar(value=session.game)
         self.sdk_var = tk.StringVar(value=session.sdk)
@@ -291,7 +496,6 @@ class Window:
         self.command_var = tk.StringVar()
         self.detected_var = tk.StringVar()
         self.status_var = tk.StringVar()
-        self.counts_var = tk.StringVar()
         self.result_var = tk.StringVar()
         self.output_var = tk.StringVar()
 
@@ -310,8 +514,8 @@ class Window:
         self.texts.append((widget, key))
         return widget
 
-    def button(self, parent, key, command):
-        widget = self.ttk.Button(parent, command=command)
+    def button(self, parent, key, command, **options):
+        widget = self.ttk.Button(parent, command=command, **options)
         self.texts.append((widget, key))
         return widget
 
@@ -320,45 +524,67 @@ class Window:
         self.texts.append((widget, key))
         return widget
 
-    def build(self):
-        tk, ttk, pad = self.tk, self.ttk, self.PAD
-        self.root.minsize(760, 560)
-        outer = ttk.Frame(self.root, padding=pad * 2)
-        outer.pack(fill="both", expand=True)
-        outer.columnconfigure(1, weight=1)
-        row = 0
+    def px(self, size):
+        """A size in pixels as it should be on this screen, which may be set to show things larger."""
+        return max(1, round(size * self.scale))
 
-        # ---- The game (GUI-001)
-        self.label(outer, "gui.game").grid(row=row, column=0, sticky="w")
-        self.game_entry = ttk.Entry(outer, textvariable=self.game_var)
+    def card(self, parent, **grid):
+        """A white panel with a thin edge, like the cards of the HTML report. Returns its inside."""
+        edge = self.tk.Frame(parent, background=self.colours["line"])
+        edge.grid(**grid)
+        inside = self.ttk.Frame(edge, padding=self.px(14))
+        inside.pack(fill="both", expand=True, padx=1, pady=1)
+        return inside
+
+    def marker(self, colour):
+        """A small bar of one colour, shown at the start of a finding's row as the HTML report
+        shows it at the edge of a finding's box."""
+        width, height = self.px(4), self.px(18)
+        image = self.tk.PhotoImage(master=self.root, width=width + self.px(6), height=height)
+        image.put(colour, to=(self.px(3), 0, self.px(3) + width, height))
+        return image
+
+    def build(self):
+        tk, ttk, pad = self.tk, self.ttk, self.px(self.PAD)
+        self.root.minsize(self.px(840), self.px(700))
+        outer = ttk.Frame(self.root, padding=pad * 2, style="Page.TFrame")
+        outer.pack(fill="both", expand=True)
+        outer.columnconfigure(0, weight=1)
+        wrap = self.px(700)
+
+        # ---- The game and what to check in it (GUI-001, GUI-002)
+        game = self.card(outer, row=0, column=0, sticky="ew")
+        game.columnconfigure(1, weight=1)
+        row = 0
+        self.label(game, "gui.game", style="Soft.TLabel").grid(row=row, column=0, sticky="w")
+        self.game_entry = ttk.Entry(game, textvariable=self.game_var)
         self.game_entry.grid(row=row, column=1, sticky="ew", padx=pad)
         self.game_entry.bind("<Return>", lambda _event: self.game_chosen())
         self.game_entry.bind("<FocusOut>", lambda _event: self.game_chosen())
-        self.game_browse = self.button(outer, "gui.browse", self.browse_game)
+        self.game_browse = self.button(game, "gui.browse", self.browse_game)
         self.game_browse.grid(row=row, column=2)
         row += 1
-        self.detected_label = ttk.Label(outer, textvariable=self.detected_var, wraplength=700, justify="left")
-        self.detected_label.grid(row=row, column=1, columnspan=2, sticky="w", padx=pad, pady=(2, pad))
+        self.detected_label = ttk.Label(game, textvariable=self.detected_var, wraplength=wrap, justify="left")
+        self.detected_label.grid(row=row, column=1, columnspan=2, sticky="w", padx=pad, pady=(self.px(4), pad))
         row += 1
 
-        # ---- The SDK, only for a game that needs one (GUI-002)
-        self.sdk_row = ttk.Frame(outer)
-        self.sdk_row.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(0, pad))
-        self.sdk_row.columnconfigure(1, weight=1)
-        self.label(self.sdk_row, "gui.sdk").grid(row=0, column=0, sticky="w")
-        self.sdk_entry = ttk.Entry(self.sdk_row, textvariable=self.sdk_var)
-        self.sdk_entry.grid(row=0, column=1, sticky="ew", padx=pad)
+        # The SDK, only for a game that needs one. Its widgets are shown and hidden together.
+        self.sdk_label = self.label(game, "gui.sdk", style="Soft.TLabel")
+        self.sdk_label.grid(row=row, column=0, sticky="w")
+        self.sdk_entry = ttk.Entry(game, textvariable=self.sdk_var)
+        self.sdk_entry.grid(row=row, column=1, sticky="ew", padx=pad)
         self.sdk_entry.bind("<Return>", lambda _event: self.sdk_chosen())
         self.sdk_entry.bind("<FocusOut>", lambda _event: self.sdk_chosen())
-        self.sdk_browse = self.button(self.sdk_row, "gui.browse", self.browse_sdk)
-        self.sdk_browse.grid(row=0, column=2)
-        self.label(self.sdk_row, "gui.sdk_hint", wraplength=700, justify="left").grid(
-            row=1, column=1, columnspan=2, sticky="w", padx=pad)
+        self.sdk_browse = self.button(game, "gui.browse", self.browse_sdk)
+        self.sdk_browse.grid(row=row, column=2)
+        row += 1
+        self.sdk_hint = self.label(game, "gui.sdk_hint", wraplength=wrap, justify="left", style="Soft.TLabel")
+        self.sdk_hint.grid(row=row, column=1, columnspan=2, sticky="w", padx=pad, pady=(self.px(4), pad))
+        self.sdk_widgets = (self.sdk_label, self.sdk_entry, self.sdk_browse, self.sdk_hint)
         row += 1
 
-        # ---- What to check (GUI-002)
-        self.label(outer, "gui.checks").grid(row=row, column=0, sticky="nw")
-        checks = ttk.Frame(outer)
+        self.label(game, "gui.checks", style="Soft.TLabel").grid(row=row, column=0, sticky="nw", pady=(self.px(3), 0))
+        checks = ttk.Frame(game)
         checks.grid(row=row, column=1, columnspan=2, sticky="w", padx=pad)
         self.stage_checks = []
         for column, name in enumerate(runner.STAGES):
@@ -366,74 +592,97 @@ class Window:
             widget.grid(row=0, column=column, sticky="w", padx=(0, pad * 2))
             self.stage_checks.append(widget)
         row += 1
-        self.languages_label = self.label(outer, "gui.languages")
-        self.languages_label.grid(row=row, column=0, sticky="nw", pady=(pad, 0))
-        self.languages_frame = ttk.Frame(outer)
-        self.languages_frame.grid(row=row, column=1, columnspan=2, sticky="w", padx=pad, pady=(pad, 0))
+        self.languages_label = self.label(game, "gui.languages", style="Soft.TLabel")
+        self.languages_label.grid(row=row, column=0, sticky="nw", pady=(self.px(7), 0))
+        self.languages_frame = ttk.Frame(game)
+        self.languages_frame.grid(row=row, column=1, columnspan=2, sticky="w", padx=pad, pady=(self.px(4), 0))
         row += 1
-        self.sandbox_check = self.check(outer, "gui.sandbox", self.sandbox_var, self.choices_changed)
-        self.sandbox_check.grid(row=row, column=1, columnspan=2, sticky="w", padx=pad, pady=(pad, 0))
-        row += 1
-
-        # ---- The same run as a command (GUI-007)
-        self.label(outer, "gui.command").grid(row=row, column=0, sticky="w", pady=(pad * 2, 0))
-        self.command_entry = ttk.Entry(outer, textvariable=self.command_var, state="readonly")
-        self.command_entry.grid(row=row, column=1, sticky="ew", padx=pad, pady=(pad * 2, 0))
-        self.button(outer, "gui.copy", self.copy_command).grid(row=row, column=2, pady=(pad * 2, 0))
+        self.sandbox_check = self.check(game, "gui.sandbox", self.sandbox_var, self.choices_changed)
+        self.sandbox_check.grid(row=row, column=1, columnspan=2, sticky="w", padx=pad, pady=(self.px(4), 0))
         row += 1
 
-        # ---- Running (GUI-003, GUI-004)
-        running = ttk.Frame(outer)
-        running.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(pad * 2, 0))
+        # The same run as a command (GUI-007), across the whole card.
+        command = ttk.Frame(game)
+        command.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(pad * 1.5, 0))
+        command.columnconfigure(0, weight=1)
+        self.label(command, "gui.command", style="Soft.TLabel").grid(row=0, column=0, columnspan=2, sticky="w")
+        self.command_entry = ttk.Entry(
+            command, textvariable=self.command_var, state="readonly", font=("TkFixedFont", 9))
+        self.command_entry.grid(row=1, column=0, sticky="ew", padx=(0, pad), pady=(self.px(3), 0))
+        self.button(command, "gui.copy", self.copy_command).grid(row=1, column=1, pady=(self.px(3), 0))
+
+        # ---- Running, and how it went (GUI-003, GUI-004, GUI-005, GUI-006)
+        running = self.card(outer, row=1, column=0, sticky="ew", pady=(pad * 1.5, 0))
         running.columnconfigure(1, weight=1)
-        self.run_button = ttk.Button(running, command=self.run_or_cancel)
-        self.run_button.grid(row=0, column=0, rowspan=2, sticky="ns")
+        self.run_button = ttk.Button(running, command=self.run_or_cancel, style="Accent.TButton")
+        self.run_button.grid(row=0, column=0, rowspan=2, sticky="w")
         self.bar = ttk.Progressbar(running, maximum=100)
-        self.bar.grid(row=0, column=1, sticky="ew", padx=pad)
-        ttk.Label(running, textvariable=self.counts_var).grid(row=0, column=2, sticky="e")
-        ttk.Label(running, textvariable=self.status_var).grid(row=1, column=1, columnspan=2, sticky="w", padx=pad)
-        row += 1
+        self.bar.grid(row=0, column=1, sticky="ew", padx=(pad * 2, 0), pady=(self.px(6), 0))
+        ttk.Label(running, textvariable=self.status_var, style="Soft.TLabel").grid(
+            row=1, column=1, sticky="w", padx=(pad * 2, 0))
 
-        # ---- The result (GUI-005, GUI-006)
-        result = ttk.Frame(outer)
-        result.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(pad, 0))
+        # The sums, as the HTML report's first screen has them. They count up while the game is played.
+        sums = ttk.Frame(running)
+        sums.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(pad * 1.5, 0))
+        self.count_vars = {}
+        for column, (kind, key) in enumerate((
+                (ERROR, "html.errors"), (WARNING, "html.warnings"), (INFO, "html.notes"),
+                (POSSIBLE, "html.possible"))):
+            box = tk.Frame(sums, background=self.colours["line"])
+            box.grid(row=0, column=column, sticky="ew", padx=(0 if column == 0 else pad, 0))
+            sums.columnconfigure(column, weight=1, uniform="sums")
+            inside = ttk.Frame(box, padding=(self.px(12), self.px(4)))
+            inside.pack(fill="both", expand=True, padx=1, pady=1)
+            self.count_vars[kind] = tk.StringVar(value="0")
+            ttk.Label(inside, textvariable=self.count_vars[kind], style=kind + ".Count.TLabel").pack(anchor="w")
+            self.label(inside, key, style="Soft.TLabel").pack(anchor="w")
+
+        result = ttk.Frame(running)
+        result.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(pad, 0))
         result.columnconfigure(0, weight=1)
         self.result_label = tk.Label(
-            result, textvariable=self.result_var, anchor="w", justify="left", wraplength=560,
-            font=("TkDefaultFont", 11, "bold"))
+            result, textvariable=self.result_var, anchor="w", justify="left", wraplength=self.px(520),
+            font=("TkDefaultFont", 12, "bold"), background=self.colours["card"], foreground=self.colours["ink"])
         self.result_label.grid(row=0, column=0, sticky="w")
         self.report_button = self.button(result, "gui.open_report", self.open_report)
-        self.report_button.grid(row=0, column=1, padx=(pad, 0))
+        self.report_button.grid(row=0, column=1, padx=(pad, 0), sticky="e")
         self.folder_button = self.button(result, "gui.open_folder", self.open_report_folder)
-        self.folder_button.grid(row=0, column=2, padx=(pad, 0))
-        ttk.Label(result, textvariable=self.output_var, wraplength=700, justify="left").grid(
-            row=1, column=0, columnspan=3, sticky="w")
-        row += 1
+        self.folder_button.grid(row=0, column=2, padx=(pad, 0), sticky="e")
+        ttk.Label(result, textvariable=self.output_var, wraplength=wrap, justify="left", style="Soft.TLabel").grid(
+            row=1, column=0, columnspan=3, sticky="w", pady=(self.px(2), 0))
 
-        # ---- The findings (GUI-009), and, in the same place, a message that stops a run (GUI-006)
-        self.findings = ttk.Treeview(outer, columns=("kind", "where", "what"), show="headings", height=9)
-        self.findings.column("kind", width=110, stretch=False)
-        self.findings.column("where", width=230, stretch=False)
-        self.findings.column("what", width=380)
-        self.findings.grid(row=row, column=0, columnspan=3, sticky="nsew", pady=(pad, 0))
-        scroll = ttk.Scrollbar(outer, orient="vertical", command=self.findings.yview)
-        scroll.grid(row=row, column=3, sticky="ns", pady=(pad, 0))
+        # ---- The findings (GUI-009)
+        found = self.card(outer, row=2, column=0, sticky="nsew", pady=(pad * 1.5, 0))
+        found.master.configure(background=self.colours["line"])
+        found.configure(padding=0)
+        found.columnconfigure(0, weight=1)
+        found.rowconfigure(0, weight=1)
+        self.findings = ttk.Treeview(found, columns=("kind", "where", "what"), show="tree headings", height=7)
+        self.findings.column("#0", width=self.px(22), minwidth=self.px(22), stretch=False)
+        self.findings.column("kind", width=self.px(120), stretch=False)
+        self.findings.column("where", width=self.px(250), stretch=False)
+        self.findings.column("what", width=self.px(380))
+        for column in ("kind", "where", "what"):
+            self.findings.heading(column, anchor="w")
+        self.findings.grid(row=0, column=0, sticky="nsew")
+        scroll = ttk.Scrollbar(found, orient="vertical", command=self.findings.yview)
+        scroll.grid(row=0, column=1, sticky="ns")
         self.findings.configure(yscrollcommand=scroll.set)
-        outer.rowconfigure(row, weight=1)
-        row += 1
+        self.markers = {kind: self.marker(self.colours[kind]) for kind in (ERROR, WARNING, INFO, POSSIBLE)}
+        outer.rowconfigure(2, weight=1)
 
-        # ---- The window's own language, and the copies the sandbox keeps (I18N-002, GUI-010)
-        bottom = ttk.Frame(outer)
-        bottom.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(pad, 0))
+        # ---- The window's own language, the copies the sandbox keeps, and about (I18N-002, GUI-010, GUI-014)
+        bottom = ttk.Frame(outer, style="Page.TFrame")
+        bottom.grid(row=3, column=0, sticky="ew", pady=(pad * 1.5, 0))
         bottom.columnconfigure(2, weight=1)
-        self.label(bottom, "gui.language").grid(row=0, column=0)
+        self.label(bottom, "gui.language", style="Page.TLabel").grid(row=0, column=0)
         # The languages are listed by name, in the order of i18n.LANGUAGES (GUI-012).
         self.lang_box = ttk.Combobox(bottom, textvariable=self.lang_var, state="readonly", width=24)
         self.lang_box.grid(row=0, column=1, padx=pad)
         self.lang_box.bind("<<ComboboxSelected>>", lambda _event: self.language_chosen())
-        self.cache_button = self.button(bottom, "gui.cache", self.show_cache)
+        self.cache_button = self.button(bottom, "gui.cache", self.show_cache, style="Page.TButton")
         self.cache_button.grid(row=0, column=3)
-        self.button(bottom, "gui.about", self.show_about).grid(row=0, column=4, padx=(pad, 0))
+        self.button(bottom, "gui.about", self.show_about, style="Page.TButton").grid(row=0, column=4, padx=(pad, 0))
 
     def retranslate(self):
         """Puts every text of the window in the interface language (I18N-001)."""
@@ -515,7 +764,7 @@ class Window:
             self.detected_var.set("\n".join(self.problems))
         elif not self.session.game:
             self.detected_var.set(t("gui.no_game"))
-        self.detected_label.configure(foreground="#b3261e" if self.problems else "")
+        self.detected_label.configure(style="Problem.TLabel" if self.problems else "TLabel")
 
     def set_languages(self, names):
         """One box for each language the game has, all ticked unless fewer were chosen before."""
@@ -577,10 +826,11 @@ class Window:
         if not busy and self.status_key is None:
             self.status_var.set(reason)
 
-        if self.needs_sdk:
-            self.sdk_row.grid()
-        else:
-            self.sdk_row.grid_remove()
+        for widget in self.sdk_widgets:
+            if self.needs_sdk:
+                widget.grid()
+            else:
+                widget.grid_remove()
         self.run_button.configure(
             text=t("gui.cancel") if busy else t("gui.run"),
             state="normal" if (busy and not session.stop.is_set()) or (ready and not busy) else "disabled")
@@ -607,7 +857,7 @@ class Window:
             return
         self.choices_changed()
         self.result, self.paths = None, None
-        self.counts = {ERROR: 0, WARNING: 0}
+        self.counts = dict.fromkeys(COUNTED, 0)
         self.findings.delete(*self.findings.get_children())
         self.show_result()
         self.show_counts()
@@ -628,7 +878,8 @@ class Window:
         self.status_var.set(t(key, **values) if key else "")
 
     def show_counts(self):
-        self.counts_var.set(t("gui.counts", errors=self.counts[ERROR], warnings=self.counts[WARNING]))
+        for kind, variable in self.count_vars.items():
+            variable.set(str(self.counts[kind]))
 
     def pump(self):
         """Takes what the threads had to say and shows it. Runs again a moment later, for as long
@@ -675,9 +926,8 @@ class Window:
             self.set_status("console.copying", done=data["done"], total=data["total"])
         elif kind == "finding":
             finding = data["finding"]
-            if not finding.possible and finding.severity in self.counts:
-                self.counts[finding.severity] += 1
-                self.show_counts()
+            self.counts[POSSIBLE if finding.possible else finding.severity] += 1
+            self.show_counts()
         elif kind == "step":
             self.bar.stop()
             self.bar.configure(mode="determinate", value=data.get("percent") or 0)
@@ -702,15 +952,16 @@ class Window:
             text = "%s  %s" % (t("console." + outcome), totals)
             if report.interrupted:
                 text = t("cli.interrupted") + "\n" + text
-            colour = "#1e6b3a" if outcome == "passed" else "#b3261e"
-            self.counts = {ERROR: report.count(ERROR), WARNING: report.count(WARNING)}
+            colour = self.colours["ok" if outcome == "passed" else "error"]
+            self.counts = {kind: report.count(kind) for kind in (ERROR, WARNING, INFO)}
+            self.counts[POSSIBLE] = report.count_possible()
             self.show_counts()
         elif self.result[0] == "stopped":
             text = t("cli.interrupted")
         else:
-            text, colour = self.result[1], "#b3261e"
+            text, colour = self.result[1], self.colours["error"]
         self.result_var.set(text)
-        self.result_label.configure(fg=colour or self.ttk.Style().lookup("TLabel", "foreground") or "black")
+        self.result_label.configure(foreground=colour or self.colours["ink"])
         if self.result and self.result[0] == "finished":
             self.list_findings(self.result[1])
 
@@ -718,7 +969,9 @@ class Window:
         self.findings.delete(*self.findings.get_children())
         for finding in report.to_dict()["findings"]:
             kind = t("gui.possible") if finding["possible"] else t("html.severity." + finding["severity"])
-            self.findings.insert("", "end", values=(kind, reports.where(finding), reports.message(finding)))
+            marker = self.markers[POSSIBLE if finding["possible"] else finding["severity"]]
+            self.findings.insert(
+                "", "end", image=marker, values=(kind, reports.where(finding), reports.message(finding)))
 
     def open_report(self):
         if self.paths:
@@ -730,22 +983,37 @@ class Window:
 
     # ------------------------------------------------------- the sandbox's copies (GUI-010)
 
+    def dialog(self, title):
+        """A second window in the same dress as the first. Returns (the window, the card to fill)."""
+        window = self.tk.Toplevel(self.root, background=self.colours["page"])
+        window.title(title)
+        window.transient(self.root)
+        set_icon(window, self.icons)
+        if self.dark:
+            # The frame is only drawn dark if it is told to be before the window is first shown.
+            window.withdraw()
+            dark_title_bar(window)
+            if self.root.winfo_viewable():
+                window.after_idle(window.deiconify)
+        page = self.ttk.Frame(window, padding=self.px(self.PAD) * 2, style="Page.TFrame")
+        page.pack(fill="both", expand=True)
+        page.columnconfigure(0, weight=1)
+        page.rowconfigure(0, weight=1)
+        return window, self.card(page, row=0, column=0, sticky="nsew")
+
     def show_cache(self):
-        tk, ttk, pad = self.tk, self.ttk, self.PAD
-        dialog = tk.Toplevel(self.root)
-        dialog.title(t("gui.cache.title"))
-        dialog.transient(self.root)
-        set_icon(dialog, self.icons)
-        frame = ttk.Frame(dialog, padding=pad * 2)
-        frame.pack(fill="both", expand=True)
-        ttk.Label(frame, text=t("cache.where", path=str(sandbox.cache_dir())), wraplength=640).pack(anchor="w")
+        ttk, pad = self.ttk, self.px(self.PAD)
+        dialog, frame = self.dialog(t("gui.cache.title"))
+        ttk.Label(
+            frame, text=t("cache.where", path=str(sandbox.cache_dir())), wraplength=self.px(640),
+            style="Soft.TLabel").pack(anchor="w")
         tree = ttk.Treeview(frame, columns=("game", "size", "used"), show="headings", height=8)
         for column, key, width in (("game", "gui.cache.game", 380), ("size", "gui.cache.size", 100),
                                    ("used", "gui.cache.used", 170)):
             tree.heading(column, text=t(key))
-            tree.column(column, width=width)
+            tree.column(column, width=self.px(width))
         tree.pack(fill="both", expand=True, pady=pad)
-        total = ttk.Label(frame)
+        total = ttk.Label(frame, style="Soft.TLabel")
         total.pack(anchor="w")
 
         def fill():
@@ -776,31 +1044,29 @@ class Window:
     # ---------------------------------------------------------------- about (GUI-014)
 
     def show_about(self):
-        tk, ttk, pad = self.tk, self.ttk, self.PAD
-        dialog = tk.Toplevel(self.root)
-        dialog.title(t("gui.about.title"))
-        dialog.transient(self.root)
-        set_icon(dialog, self.icons)
+        tk, ttk, pad = self.tk, self.ttk, self.px(self.PAD)
+        dialog, frame = self.dialog(t("gui.about.title"))
         dialog.resizable(False, False)
-        frame = ttk.Frame(dialog, padding=pad * 3)
-        frame.pack(fill="both", expand=True)
+        wrap = self.px(380)
 
         if len(self.icons) > 2:
             ttk.Label(frame, image=self.icons[2]).grid(row=0, column=0, rowspan=2, padx=(0, pad * 2), sticky="n")
-        ttk.Label(frame, text="RenPyTester", font=("TkDefaultFont", 14, "bold")).grid(row=0, column=1, sticky="w")
-        ttk.Label(frame, text=t("gui.about.version", version=__version__)).grid(row=1, column=1, sticky="w")
-        ttk.Label(frame, text=t("cli.description"), wraplength=380, justify="left").grid(
+        ttk.Label(frame, text="RenPyTester", style="Title.TLabel").grid(row=0, column=1, sticky="w")
+        ttk.Label(frame, text=t("gui.about.version", version=__version__), style="Soft.TLabel").grid(
+            row=1, column=1, sticky="w")
+        ttk.Label(frame, text=t("cli.description"), wraplength=wrap, justify="left").grid(
             row=2, column=0, columnspan=2, sticky="w", pady=(pad * 2, 0))
         ttk.Label(frame, text=t("gui.about.credit", author=__author__)).grid(
             row=3, column=0, columnspan=2, sticky="w", pady=(pad, 0))
-        ttk.Label(frame, text=t("gui.about.licence"), wraplength=380, justify="left").grid(
+        ttk.Label(frame, text=t("gui.about.licence"), wraplength=wrap, justify="left", style="Soft.TLabel").grid(
             row=4, column=0, columnspan=2, sticky="w")
         # The one thing in the program that leads to the network, and only when it is clicked (SAFE-008).
         # A button made to look like a link, so that it can be reached and pressed from the keyboard too.
+        colours = self.colours
         link = tk.Button(
-            frame, text=__url__, fg="#1f5fa8", activeforeground="#1f5fa8", cursor="hand2", relief="flat",
-            borderwidth=0, padx=0, pady=0, font=("TkDefaultFont", 9, "underline"),
-            command=lambda: self.open_link(__url__))
+            frame, text=__url__, fg=colours["info"], activeforeground=colours["info"], bg=colours["card"],
+            activebackground=colours["card"], cursor="hand2", relief="flat", borderwidth=0, padx=0, pady=0,
+            font=("TkDefaultFont", 10, "underline"), command=lambda: self.open_link(__url__))
         link.grid(row=5, column=0, columnspan=2, sticky="w", pady=(pad, 0))
         ttk.Button(frame, text=t("gui.close"), command=dialog.destroy).grid(
             row=6, column=0, columnspan=2, sticky="e", pady=(pad * 2, 0))
@@ -842,6 +1108,7 @@ def main(game=None, lang=None):
     except ImportError:
         raise ToolError("error.no_tkinter") from None
     name_for_taskbar()
+    make_sharp()
     try:
         root = tkinter.Tk()
     except tkinter.TclError as error:

@@ -9,22 +9,16 @@ engine's traceback. Everything the game or the engine wrote is escaped: it is sh
 import html
 from pathlib import Path
 
-from renpytester import i18n
+from renpytester import i18n, palette
 from renpytester.i18n import t
 from renpytester.model import ERROR, INFO, SEVERITIES, WARNING
 from renpytester.report import NOT_ASKED, choices, human_size, message, outcome
 
+# The colours are the window's too, and are kept in one place for both (GUI-015).
 STYLE = """
-:root {
-  --page: #f6f5f1; --card: #ffffff; --ink: #1d1f24; --soft: #5d6470; --line: #dcdad2;
-  --error: #b3261e; --warning: #9a5b00; --info: #1f5fa8; --ok: #1e6b3a; --possible: #6b4aa0; --code: #f0eee8;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --page: #16181d; --card: #1f2229; --ink: #e8e6e1; --soft: #a2a8b3; --line: #363a44;
-    --error: #ff8a80; --warning: #f0b45a; --info: #86b7f5; --ok: #7fd49b; --possible: #c3a6f2; --code: #14161a;
-  }
-}
+:root { %s }
+@media (prefers-color-scheme: dark) { :root { %s } }
+""" % (palette.css_variables(palette.LIGHT), palette.css_variables(palette.DARK)) + """
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--page); color: var(--ink); font: 15px/1.5 system-ui, "Segoe UI", sans-serif; }
 main { max-width: 1040px; margin: 0 auto; padding: 24px 16px 48px; }

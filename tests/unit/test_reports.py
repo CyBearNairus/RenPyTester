@@ -1,5 +1,6 @@
 """The JUnit and HTML reports (spec REP-003, REP-004), made from the same data as the JSON report."""
 
+import re
 import xml.etree.ElementTree as ElementTree
 from html.parser import HTMLParser
 
@@ -193,6 +194,23 @@ def test_html_report_has_the_summary_then_findings_by_file_then_possible_issues(
     for control in ('value="error" checked', 'value="warning" checked', 'value="info" checked',
                     'id="filter-stage"', 'id="filter-language"', '<option value="french">'):
         assert control in text, control
+
+
+@pytest.mark.req("GUI-015", "REP-004")
+def test_colours_are_kept_in_one_place_for_the_report_and_the_window(data):
+    from renpytester import palette
+
+    assert set(palette.LIGHT) == set(palette.DARK)
+    assert all(re.fullmatch("#[0-9a-f]{6}", value) for value in [*palette.LIGHT.values(), *palette.DARK.values()])
+    assert palette.css_variables({"page": "#ffffff", "ink": "#000000"}) == "--page: #ffffff; --ink: #000000;"
+    assert palette.system_is_dark() in (True, False)
+
+    text = html_report.render(data)
+    assert ":root { %s }" % palette.css_variables(palette.LIGHT) in text
+    assert "@media (prefers-color-scheme: dark) { :root { %s } }" % palette.css_variables(palette.DARK) in text
+    # No colour is written into the page anywhere else.
+    rest = text.replace(palette.css_variables(palette.LIGHT), "").replace(palette.css_variables(palette.DARK), "")
+    assert not re.search("#[0-9a-fA-F]{6}", rest)
 
 
 @pytest.mark.req("REP-004", "I18N-005")

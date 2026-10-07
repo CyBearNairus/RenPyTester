@@ -215,7 +215,6 @@
   "gui.starting": "Starting the game, with no window...",
   "gui.stopping": "Stopping, and putting the game folder back as it was...",
   "gui.playing": "Playing... {paths} paths done, {waiting} branches waiting, {percent}% of the script played",
-  "gui.counts": "Errors: {errors}   Warnings: {warnings}",
   "gui.need_stage": "Choose at least one thing to check.",
   "gui.need_language": "Choose at least one language, or untick the translations.",
   "gui.reports_in": "Reports are saved in {path}",

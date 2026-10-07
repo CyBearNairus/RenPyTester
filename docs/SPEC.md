@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Version 0.16 **approved** by the project owner on 2026-10-06. Version 0.17 amendments (from building M7) await approval. Version 0.18 adds three requirements the owner asked for. |
+| Status | Version 0.16 **approved** by the project owner on 2026-10-06. Version 0.17 amendments (from building M7) await approval. Versions 0.18 and 0.19 add requirements the owner asked for. |
 | Last updated | 2026-10-06 |
 
 This document is the source of truth for what RenPyTester does.
@@ -349,7 +349,7 @@ It is a front end to the same run the command line performs, not a second implem
 | GUI-001 | MUST | Choose the game by browsing for a folder or dropping one on the executable. Once chosen, show what was detected (GAME-006): name, engine version, languages. The game's path can also be typed or pasted. Finding out what the game is runs in the background, as `renpytester info` does it (CLI-008); when the game cannot be started, the window says why. |
 | GUI-002 | MUST | Options shown as plain controls with sensible defaults: stages to run, languages to test, sandbox copy on/off (SAFE-006), and an optional SDK folder when the game needs one. Everything else stays at its default or comes from `renpytester.toml`. The SDK control is shown only for a game that has no engine of its own, and starts with the folder the `RENPY_SDK` environment variable names, if any. There is one box for each language the game has, all ticked at first. *Run* is not available while nothing is ticked to check, or translations are ticked with no language. |
 | GUI-003 | MUST | A *Run* button that becomes *Cancel* during a run. Cancelling behaves as Ctrl+C does (CLI-006). Closing the window during a run cancels the run first, and the window closes when the game folder has been restored. |
-| GUI-004 | MUST | During a run: one progress bar, the current stage, and running counts of errors and warnings. No game window appears (ARCH-006). The interface stays responsive. The bar shows how much of the script has been played; until the game reports in, it shows only that work is going on. The controls cannot be changed during a run. |
+| GUI-004 | MUST | During a run: one progress bar, the current stage, and running counts of errors and warnings. No game window appears (ARCH-006). The interface stays responsive. The bar shows how much of the script has been played; until the game reports in, it shows only that work is going on. The controls cannot be changed during a run. Notes and possible issues are counted too. |
 | GUI-005 | MUST | After a run: a pass/fail result, counts by severity, and a button that opens the HTML report in the default browser. A second button opens the folder the reports are in. |
 | GUI-006 | MUST | Problems that stop a run (no engine found, unsupported engine, game already being tested) are shown as a readable message in the window, not as a traceback or a silent exit. This goes for a config file with a mistake in it (CFG-004), and for a failure of RenPyTester itself, which is shown as that (NFR-004). |
 | GUI-007 | MUST | Every GUI run can be expressed as a command line; the window shows that command so a developer can copy it into CI. The command has only what differs from the defaults, quoted for the user's own terminal, and the window's language as `--lang`. Given to the command line, it makes a run with the same settings. |
@@ -360,6 +360,7 @@ It is a front end to the same run the command line performs, not a second implem
 | GUI-012 | MUST | The window's language selector shows each interface language by its name (*English*, *Brazilian Portuguese*), not by its code, and the names themselves follow the language the window is in. The name of every language is in every message file, so that adding a language still needs no change to the code (I18N-008). |
 | GUI-013 | MUST | The program has an icon of its own, original artwork, which the window, its dialogs and the taskbar or dock entry show in place of Python's. The icon files are part of the package, and are made by a development tool from a drawing in code, so that they can be made again. A window that cannot load the icon opens without it. |
 | GUI-014 | MUST | An *About* button opens a dialog with the program's name, icon and version, a credit to its author, CyBearNairus, its licence, and the address of its GitHub repository, which opens in the default browser when clicked. Nothing is fetched from the network unless the user clicks that link (SAFE-008). |
+| GUI-015 | MUST | The window looks like the HTML report (REP-004): the same colours, panels with a thin edge on a quieter background, the sums of errors, warnings, notes and possible issues as large coloured numbers, and each listed finding marked with the colour of its kind. The colours are kept in one place that both use. The window is dark when the system is set to dark, and light otherwise, as the report is in a browser. *Run* is the one coloured button. On a screen set to show things larger, the window is drawn sharp at that size. All of this is done with Tk's own styles and small pictures drawn by the program: no library is added (ARCH-005). |
 
 ### 4.15 Interface languages (I18N)
 
@@ -468,7 +469,7 @@ The harness's Python version cannot be chosen with a virtual environment, becaus
 | M4 | Translations (**done** 2026-10-06) | Language discovery and all TL MUSTs. The SHOULD and COULD rows of 4.7 are left for later, except orphan translations (TL-007), which lint already reports. | TL-001–006, -012 |
 | M5 | Reports and config (**done** 2026-10-06) | JUnit, HTML, config file, ignore rules, baseline, the partial report after Ctrl+C and the `info` command. The two SHOULD rows that add more to the config file, stated outcomes of interactions (RUN-022) and user-authored paths (EXP-009), are left for later. | REP-003, -004, -007, -010, CFG-001–007, CLI-005, -006, -008 |
 | M6 | Sandbox (**done** 2026-10-06) | Cached copy with incremental synchronisation, cache commands, and the report of files a game writes by itself. The GUI's part of SAFE-012 comes with M7. | SAFE-006, -007, -009–012 |
-| M7 | Graphical interface (**done** 2026-10-06) | The window described in 4.14. | GUI-001–014, CLI-007, COMPAT-007 |
+| M7 | Graphical interface (**done** 2026-10-06) | The window described in 4.14. | GUI-001–015, CLI-007, COMPAT-007 |
 | M8 | Packaging | Single-file executables, release CI. | DIST |
 | M9 | Hardening | Screen smoke test, performance, acceptance. | UI, NFR, 7.4 |
 
@@ -502,6 +503,7 @@ Settled on 2026-10-06:
 
 | # | Decision |
 | --- | --- |
+| D23 | Asked for by the owner: the window is to look modern, like the HTML report (GUI-015). The licence stays GPL-3.0. |
 | D22 | Asked for by the owner: the window's language selector shows names, not codes (GUI-012); the program has an icon (GUI-013); and an *About* dialog gives the version, credits CyBearNairus and links to the repository (GUI-014). |
 | D20 | Version 0.16 amendments approved: SAFE-006, SAFE-007 and SAFE-009 to SAFE-012 made precise. Several game processes share the one sandbox copy, and a game writing its own files is a note, not a finding. |
 | D19 | Version 0.15 amendments approved: REP-010 and CFG-007 added; REP-003, REP-007, CFG-002 to CFG-006, CLI-006, CLI-008 and I18N-002 made precise. |
@@ -548,3 +550,4 @@ Settled on 2026-10-06:
 | 2026-10-06 | 0.16 | M6 built. D19 settled (0.15 approved). SAFE-006, SAFE-007 and SAFE-009 to SAFE-012 made precise; `--sandbox` and `--sandbox-verify` added to CLI-011; the assumption about parallel processes in a sandbox settled by decision (9.1). |
 | 2026-10-06 | 0.17 | M7 built. D20 settled (0.16 approved). Added GUI-011 (where the window saves reports); GUI-001 to GUI-008, GUI-010, CLI-007 and COMPAT-007 made precise. |
 | 2026-10-06 | 0.18 | Owner's requests (D22): added GUI-012 (languages shown by name), GUI-013 (the program's icon) and GUI-014 (the *About* dialog). |
+| 2026-10-06 | 0.19 | Owner's request (D23): added GUI-015 (the window looks like the HTML report, light or dark); GUI-004 counts notes and possible issues too. |

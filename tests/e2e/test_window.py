@@ -66,7 +66,7 @@ def open_window(sdk, tmp_path, monkeypatch):
     monkeypatch.delenv("RENPY_SDK", raising=False)
     roots = []
 
-    def build(lang="en", with_sdk=True):
+    def build(lang="en", with_sdk=True, dark=False):
         root = None
         for attempt in range(3):
             try:
@@ -83,7 +83,7 @@ def open_window(sdk, tmp_path, monkeypatch):
         session = gui.Session()
         session.lang = i18n.set_language(lang)
         session.sdk = str(sdk) if with_sdk else ""
-        return Driver(root, gui.Window(root, session), session)
+        return Driver(root, gui.Window(root, session, dark=dark), session)
 
     yield build
     i18n.set_language("en")
@@ -102,6 +102,15 @@ def open_window(sdk, tmp_path, monkeypatch):
             item._tk = None
     roots.clear()
     gc.collect()
+
+
+def inside(widget):
+    """Every widget inside a widget, however deep."""
+    found = []
+    for child in widget.winfo_children():
+        found.append(child)
+        found.extend(inside(child))
+    return found
 
 
 def cli_findings(game, sdk, output, lang):
@@ -125,7 +134,7 @@ def test_choosing_a_game_shows_what_it_is_and_offers_its_languages(open_window, 
     assert sorted(window.language_vars) == ["portuguese", "spanish"]
     assert all(variable.get() for variable in window.language_vars.values())
     # A project needs an SDK, so the window asks for one; here it already has it.
-    assert window.sdk_row.winfo_manager() == "grid"
+    assert all(widget.winfo_manager() == "grid" for widget in window.sdk_widgets)
     assert driver.state(window.run_button) == "normal"
     assert window.output_var.get().startswith("Reports are saved in ")
     assert folder_digest(game) == before
@@ -143,7 +152,7 @@ def test_project_with_no_sdk_is_asked_for_one_in_the_window(open_window, game_co
     window = driver.window
     driver.choose(game_copy("clean"))
     assert "does not include a Ren'Py engine" in window.detected_var.get()
-    assert window.sdk_row.winfo_manager() == "grid"
+    assert window.sdk_entry.winfo_manager() == "grid"
     assert driver.state(window.run_button) == "disabled"
 
     window.sdk_var.set(str(sdk))
@@ -170,8 +179,8 @@ def test_run_from_the_window_finds_what_the_command_line_finds(open_window, game
     assert window.result[0] == "finished"
     assert window.result_var.get().startswith("FAILED" if lang == "en" else "FALHOU")
     assert ("2 errors" if lang == "en" else "2 erros") in window.result_var.get()
-    assert window.counts_var.get().split() == (["Errors:", "2", "Warnings:", "0"] if lang == "en" else [
-        "Erros:", "2", "Avisos:", "0"])
+    assert {kind: variable.get() for kind, variable in window.count_vars.items()} == {
+        "error": "2", "warning": "0", "info": "0", "possible": "0"}
     assert window.bar["value"] == 100
     assert driver.state(window.report_button) == "normal"
     assert window.paths["html"].is_file() and window.paths["html"].parent == tmp_path / "report"
@@ -324,14 +333,13 @@ def test_sandbox_can_be_chosen_and_its_copies_managed_from_the_window(open_windo
 
     dialog = window.show_cache()
     driver.root.update()
-    tree = next(w for w in dialog.winfo_children()[0].winfo_children() if w.winfo_class() == "Treeview")
+    tree = next(w for w in inside(dialog) if w.winfo_class() == "Treeview")
     rows = [tree.item(row, "values") for row in tree.get_children()]
     assert [row[0] for row in rows] == [str(game)]
     assert len(sandbox.listing()) == 1
 
     tree.selection_set(tree.get_children()[0])
-    buttons = [w for w in dialog.winfo_children()[0].winfo_children()[-1].winfo_children()]
-    delete = next(b for b in buttons if b["text"] == "Delete the selected")
+    delete = next(w for w in inside(dialog) if w.winfo_class() == "TButton" and w["text"] == "Delete the selected")
     delete.invoke()
     driver.root.update()
     assert tree.get_children() == ()
@@ -387,12 +395,7 @@ def test_failure_of_the_tool_itself_is_shown_in_the_window(open_window, game_cop
 
 def texts_in(widget):
     """Every text shown by a widget and the widgets inside it."""
-    found = []
-    for child in widget.winfo_children():
-        if "text" in child.keys() and child["text"]:
-            found.append(str(child["text"]))
-        found.extend(texts_in(child))
-    return found
+    return [str(child["text"]) for child in inside(widget) if "text" in child.keys() and child["text"]]
 
 
 @pytest.mark.req("GUI-013")
@@ -445,8 +448,52 @@ def test_about_gives_the_version_the_author_and_the_repository(open_window, monk
 
     # Nothing goes to the network until the address is clicked (SAFE-008).
     assert opened == []
-    link = next(child for child in dialog.winfo_children()[0].winfo_children()
-                if str(child["text"]).startswith("https://"))
+    link = next(child for child in inside(dialog)
+                if "text" in child.keys() and str(child["text"]).startswith("https://"))
     link.invoke()
     assert opened == ["https://github.com/CyBearNairus/RenPyTester"]
+    dialog.destroy()
+
+
+@pytest.mark.req("GUI-015")
+@pytest.mark.parametrize("dark", [False, True])
+def test_window_wears_the_colours_of_the_html_report(open_window, game_copy, dark):
+    from tkinter import ttk
+
+    from renpytester import palette
+    from renpytester.report import html_report
+
+    driver = open_window(dark=dark)
+    window = driver.window
+    colours = palette.DARK if dark else palette.LIGHT
+    assert window.colours is colours
+
+    style = ttk.Style(driver.root)
+    assert driver.root["background"] == colours["page"]
+    assert style.lookup("TFrame", "background") == colours["card"]
+    assert style.lookup("TLabel", "foreground") == colours["ink"]
+    assert style.lookup("Accent.TButton", "background") == colours["accent"]
+    assert window.run_button["style"] == "Accent.TButton"
+    for kind in ("error", "warning", "info", "possible"):
+        assert style.lookup(kind + ".Count.TLabel", "foreground") == colours[kind]
+    # The report has the very same values, light and dark, because both take them from one place.
+    page = html_report.render({"findings": [], "stages": {}, "settings": {}, "game": {}})
+    for name, value in list(palette.LIGHT.items()) + list(palette.DARK.items()):
+        assert "--%s: %s;" % (name, value) in page
+
+    # A run fills the sums and marks each finding with the colour of its kind, as the report does.
+    driver.choose(game_copy("two_bugs"))
+    window.stage_vars["lint"].set(False)
+    window.stage_vars["translations"].set(False)
+    window.choices_changed()
+    driver.run()
+    assert window.count_vars["error"].get() == "2"
+    rows = window.findings.get_children()
+    assert len(rows) == 2
+    assert all(window.findings.item(row, "image")[0] == str(window.markers["error"]) for row in rows)
+    assert window.result_label["foreground"] == colours["error"]
+
+    # Dialogs are dressed the same.
+    dialog = window.show_about()
+    assert dialog["background"] == colours["page"]
     dialog.destroy()

@@ -81,6 +81,10 @@ The ones that cause real damage if forgotten:
 - **The icon is drawn by `tools/make_icon.py`**, which needs Pillow, a development tool only; the files it writes under `renpytester/assets/` are committed.
   To change the icon, change the drawing in that tool and run it; never edit the image files or bring in artwork from elsewhere.
   On Windows each window is given the icon by itself with `iconbitmap`, because Tk's ways of setting one icon for all windows set none there.
+- **Colours live in `renpytester/palette.py` and nowhere else.**
+  The HTML report and the window both take them from there, so that they look like one program; a colour written into `gui.py` or the report's style is a mistake, and a test looks for them in the report.
+  The window's look is made with Tk's own `clam` theme restyled in `gui.apply_theme`, plus small pictures the program draws itself (tick boxes, the markers beside findings); nothing is added to what the program needs.
+  Sizes in pixels go through `Window.px`, so that the window is right on a screen set to show things larger.
 - **The window is never shown in tests** (`root.withdraw()`), and tests must replace `gui.default_output`: the real one is in the user's home folder.
 - **Never re-implement the engine.** Parsing, lint, translation lookup and text substitution are done by the game's own Ren'Py, never by our code.
 - **A translation is not at fault for what its original does too.**

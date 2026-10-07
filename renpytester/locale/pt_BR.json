@@ -215,7 +215,6 @@
   "gui.starting": "Iniciando o jogo, sem janela...",
   "gui.stopping": "Parando, e deixando a pasta do jogo como estava...",
   "gui.playing": "Jogando... {paths} caminhos concluídos, {waiting} ramos aguardando, {percent}% do script jogado",
-  "gui.counts": "Erros: {errors}   Avisos: {warnings}",
   "gui.need_stage": "Escolha pelo menos uma coisa para verificar.",
   "gui.need_language": "Escolha pelo menos um idioma, ou desmarque as traduções.",
   "gui.reports_in": "Os relatórios são gravados em {path}",
