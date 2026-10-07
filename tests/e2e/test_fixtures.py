@@ -320,6 +320,21 @@ def test_hub_menu_is_covered_without_looping(run):
     assert report["stages"]["routes"]["paths"] <= 8
 
 
+@pytest.mark.req("EXP-021", "EXP-017")
+def test_hub_is_gone_round_again_while_that_reaches_something_new(run):
+    code, report, _text, _game = run("hub_days", "--stages", "routes")
+    assert code == 1
+    assert len(report["findings"]) == 1
+    finding = report["findings"][0]
+    # The kitchen crashes on the third day only, which takes going to every room of the house twice over.
+    assert (finding["class"], finding["line"], finding["possible"]) == ("exception", 26, False)
+    assert choices(finding) == ["Kitchen", "Bedroom", "Kitchen", "Bedroom", "Kitchen"]
+    # The path that starts with the bedroom finds nothing the first had not played, and stops at the hub.
+    ends = report["stages"]["routes"]["end_reasons"]
+    assert (ends["exception"], ends["exhausted"]) == (1, 1)
+    assert report["coverage"]["executed"] == report["coverage"]["total"]
+
+
 @pytest.mark.req("EXP-006")
 def test_first_strategy_plays_a_single_path(run):
     code, report, _text, _game = run("branches", "--strategy", "first")
@@ -660,6 +675,22 @@ def test_buttons_of_a_called_screen_are_explored_like_the_choices_of_a_menu(run)
     finding = report["findings"][0]
     assert (finding["class"], finding["file"], finding["line"]) == ("exception", "game/script.rpy", 19)
     assert [(step["kind"], step["choice"], step["index"]) for step in finding["path"]] == [("screen", "Right door", 1)]
+    assert report["stages"]["routes"]["end_reasons"] == {"end": 1, "exception": 1}
+    assert report["coverage"]["executed"] == report["coverage"]["total"]
+
+
+@pytest.mark.req("RUN-006", "EXP-004")
+def test_places_of_a_map_that_jump_are_explored_like_the_choices_of_a_menu(run):
+    # Each place is a hotspot with no text, written as "clicked" with a list of actions that ends in a jump.
+    code, report, _text, _game = run("screen_map", "--stages", "routes", "--no-labels")
+    assert code == 1
+    assert len(report["findings"]) == 1
+    finding = report["findings"][0]
+    assert (finding["class"], finding["file"], finding["line"]) == ("exception", "game/script.rpy", 32)
+    assert [(step["kind"], step["choice"], step["index"]) for step in finding["path"]] == [
+        ("screen", "(Jump cellar)", 1)]
+    assert finding["possible"] is False
+    # The screen that comes straight after the map has its own button and none of the map's places.
     assert report["stages"]["routes"]["end_reasons"] == {"end": 1, "exception": 1}
     assert report["coverage"]["executed"] == report["coverage"]["total"]
 

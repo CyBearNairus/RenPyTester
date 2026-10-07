@@ -86,6 +86,12 @@ init 999 python hide:
             # The current path: its decisions, and which options it has already taken where.
             "path": [],
             "taken": {},
+            # Going round a hub again (EXP-021): the statements this exploration has played, how many of
+            # them the current path was the first to play, and what that number was when the path
+            # started on the options of each decision point it has come back to.
+            "known": set(),
+            "news": 0,
+            "rounds": {},
             "label": None,
             "interact_type": None,
             # Exploration.
@@ -361,6 +367,8 @@ init 999 python hide:
             state["goto"] = label
             state["path"] = []
             state["taken"] = {}
+            state["news"] = 0
+            state["rounds"] = {}
             state["label"] = None
             state["forced"] = None
             state["replay"] = None
@@ -389,6 +397,7 @@ init 999 python hide:
             # Each label run explores by itself, whatever was explored before it, so that the result
             # does not depend on which process plays which label (EXP-015).
             state["scheduled"] = set()
+            state["known"] = set()
             reported.clear()
             emit("label_start", label=label, path=list(state["path"]))
             to_root()
@@ -411,6 +420,8 @@ init 999 python hide:
                 entry = state["stack"].pop()
                 state["path"] = entry["path"]
                 state["taken"] = entry["taken"]
+                state["news"] = entry["news"]
+                state["rounds"] = entry["rounds"]
                 state["label"] = entry["label"]
                 state["speculative"] = entry["speculative"]
                 state["origin"] = entry["origin"]
@@ -438,7 +449,8 @@ init 999 python hide:
             The first option not yet tried anywhere is taken (EXP-001), and each other untried option
             is kept for later with a snapshot. When the same decision point comes round again on one
             path, an option that path has not taken is used, so that hub menus are walked through
-            instead of looped; when the path has taken them all, it ends.
+            instead of looped; when the path has taken them all, it goes round them again if that has
+            been reaching something new (EXP-021), and ends if not.
             """
             decision = renpy.game.context().current
             taken = state["taken"].setdefault(decision, set())
@@ -449,6 +461,17 @@ init 999 python hide:
                 seen[label] = seen.get(label, 0) + 1
                 keys.append((decision, label, seen[label]))
 
+            untried_here = [i for i in range(len(options)) if i not in taken]
+            started = state["rounds"].setdefault(decision, state["news"])
+            if not untried_here and state["news"] > started:
+                # Every option here has been taken on this path, and since the path started on them it
+                # has played something nothing had played before. In a game that is walked around, where
+                # the same map comes back day after day, that is the story moving on: go round once more
+                # (EXP-021).
+                taken.clear()
+                state["rounds"][decision] = state["news"]
+                untried_here = list(range(len(options)))
+
             if state["replay"]:
                 pick = state["replay"].pop(0)
                 if pick >= len(options):
@@ -458,7 +481,6 @@ init 999 python hide:
                 if pick >= len(options):
                     next_path("replay mismatch")
             else:
-                untried_here = [i for i in range(len(options)) if i not in taken]
                 if not untried_here:
                     next_path("exhausted")
                 fresh = [i for i in untried_here if keys[i] not in state["scheduled"]]
@@ -480,6 +502,7 @@ init 999 python hide:
                         state["stack"].append({
                             "snapshot": data, "index": i, "path": list(state["path"]),
                             "taken": dict((k, set(v)) for k, v in state["taken"].items()),
+                            "news": state["news"], "rounds": dict(state["rounds"]),
                             "label": state["label"], "random": random.getstate(),
                             "speculative": state["speculative"], "origin": state["origin"],
                             "base_depth": state["base_depth"]})
@@ -518,6 +541,9 @@ init 999 python hide:
 
             node = story.get(name)
             if node is not None:
+                if name not in state["known"]:
+                    state["known"].add(name)
+                    state["news"] += 1
                 if state["fresh"]:
                     # The first statement played after the game started or was put back to a snapshot.
                     # When that is the story's first statement, nothing has set the variables the
@@ -762,11 +788,30 @@ init 999 python hide:
                 setattr(store, name, value)
             return outcome["result"]
 
+        def button_action(d):
+            """What a click on the button runs, or None."""
+            # The engine keeps what a button is given as "clicked" in `action` only when it is one action.
+            # A list of actions or a plain function stays in `clicked`, which is what a click runs then.
+            action = getattr(d, "action", None)
+            return action if action is not None else getattr(d, "clicked", None)
+
+        def action_name(action):
+            """A name for a button with no text on it, such as a hotspot of a map."""
+            # No memory addresses in labels: paths must read the same on every run (NFR-001).
+            actions = list(action) if isinstance(action, (list, tuple)) else [action]
+            # Where the story goes says more than what else the click does, such as clearing a tooltip.
+            targets = [
+                "%s %s" % (type(a).__name__, a.label) for a in actions
+                if isinstance(getattr(a, "label", None), str)]
+            if targets:
+                return "(%s)" % ", ".join(targets)
+            return "(%s)" % type(actions[0] if actions else action).__name__
+
         def screen_buttons(ctx):
             found = []
 
             def visit(d):
-                if isinstance(d, renpy.display.behavior.Button) and getattr(d, "action", None) is not None:
+                if isinstance(d, renpy.display.behavior.Button) and button_action(d) is not None:
                     words = []
 
                     def collect(child):
@@ -776,9 +821,7 @@ init 999 python hide:
                     d.visit_all(collect)
                     for text in words:
                         check_text(text)
-                    action = d.action[0] if isinstance(d.action, (list, tuple)) and d.action else d.action
-                    # No memory addresses in labels: paths must read the same on every run (NFR-001).
-                    found.append((" ".join(words).strip() or "(%s)" % type(action).__name__, d))
+                    found.append((" ".join(words).strip() or action_name(button_action(d)), d))
 
             scene_lists = ctx.scene_lists
             for layer in scene_lists.layers:
@@ -788,7 +831,7 @@ init 999 python hide:
                         d.update()
                     d.visit_all(visit)
 
-            return [(label, d) for label, d in found if renpy.is_sensitive(d.action)]
+            return [(label, d) for label, d in found if renpy.is_sensitive(button_action(d))]
 
         def interact_with_screen(ctx):
             for _attempt in range(50):
@@ -796,7 +839,7 @@ init 999 python hide:
                 if not buttons:
                     break
                 pick = choose("screen", [label for label, d in buttons])
-                value = renpy.run(buttons[pick][1].action)
+                value = renpy.run(button_action(buttons[pick][1]))
                 if value is not None:
                     return value
             return skip_interaction(ctx)

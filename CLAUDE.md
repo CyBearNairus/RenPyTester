@@ -7,7 +7,7 @@ Runnable from source with plain Python or as a single-file executable, from a te
 
 **Milestones M0 (spikes), M1 (walking skeleton), M2 (lint stage), M3a (exploration), M3b (checks that need no rendering), M3c (getting past minigames), M3d (label runs), M3e (parallel processes) and M4 (translations) are done.**
 **M5 (reports and config), M6 (sandbox), M7 (graphical interface), M8 (packaging) and M9 (hardening) are done too: every milestone of the spec is built.**
-[docs/SPEC.md](docs/SPEC.md) version 0.27 is approved, and nothing in it is waiting for the owner.
+[docs/SPEC.md](docs/SPEC.md) version 0.29 is approved, and nothing in it is waiting for the owner.
 What the spec still lists and nobody has built are SHOULD and COULD rows only; `tests/unit/test_project.py` fails when a MUST requirement is named by no test.
 What works today: `python -m renpytester GAME` finds the game and its engine and explores every choice of every menu with no window, using in-memory snapshots, and carries on after a crash or a hang.
 While playing it checks for undefined images, missing image, audio and movie files, broken text tags and menus with nothing to choose.
@@ -142,6 +142,11 @@ The ones that cause real damage if forgotten:
   Harness and orchestrator bugs exit with code 3 and say they are RenPyTester bugs.
 - **Nothing is rendered.** The harness replaces the engine's interaction layer, so render-time failures (missing image files, bad text tags, screen errors) never show up by themselves.
   Each must be checked explicitly when the statement runs.
+- **What a click on a button runs is its `action`, or else its `clicked`.**
+  The engine keeps a list of actions or a plain function given as `clicked` there and leaves `action` empty, which is how the hotspots of a map are often written.
+  In the harness, ask `button_action`; a button looked at through `action` alone is a map with nothing to click, and a game walked around on one is hardly played.
+- **A path goes round a hub again only while that reaches something new** (EXP-021).
+  What counts as new is kept for the story's exploration, and afresh for each label run (`state["known"]`); counting what the process played before would make the result depend on `--jobs`.
 - **A snapshot goes back to the engine's last hard checkpoint, not to where it was taken.**
   The engine then replays forward from there, which only works if everything since is part of the game's own state.
   Anything the harness does to the flow, such as the jump that starts a label run, must be followed by `renpy.game.log.checkpoint(hard=True)`.
