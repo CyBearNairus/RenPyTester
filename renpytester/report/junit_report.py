@@ -19,7 +19,7 @@ from renpytester.i18n import t
 from renpytester.report import FINISHED, NOT_ASKED, choices, fails, message, where
 
 # Characters XML 1.0 does not allow, which a traceback or a game's text may contain.
-NOT_XML = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f￾￿]")
+NOT_XML = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\ufffe\uffff]")
 
 
 def clean(text):
