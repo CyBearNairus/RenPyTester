@@ -24,7 +24,8 @@ Settings can be kept in a `renpytester.toml` in the game folder: any option, ign
 `--baseline` leaves out what an earlier report already had, Ctrl+C still writes a report of what was found, and `renpytester info GAME` says what a game is without playing it.
 With `--sandbox` a copy of the game is tested and the game itself is only read; the copy is kept in a per-user cache and brought up to date on later runs, and `renpytester cache list` and `cache clear` manage it.
 A game whose own script writes into its folder is told so in the report.
-`python -m renpytester` with nothing after it, or `renpytester gui [GAME]`, opens a window that makes the same runs: choose the game, tick what to check, run or cancel, and read the result and the findings there.
+`python -m renpytester` with nothing after it, or `renpytester gui [GAME]`, opens a window that makes the same runs: choose the game, run or cancel, and read the result and the findings there.
+What to check, the languages, the sandbox and the report folder are *advanced settings*, one click away.
 The window has the program's own icon, lists its languages by name, and has an *About* dialog with the version, the author and the repository.
 Not built yet: packaging (M8).
 Engine facts and hooks are recorded in [docs/SPIKES.md](docs/SPIKES.md): read it before touching the harness.
@@ -85,6 +86,10 @@ The ones that cause real damage if forgotten:
   The HTML report and the window both take them from there, so that they look like one program; a colour written into `gui.py` or the report's style is a mistake, and a test looks for them in the report.
   The window's look is made with Tk's own `clam` theme restyled in `gui.apply_theme`, plus small pictures the program draws itself (tick boxes, the markers beside findings); nothing is added to what the program needs.
   Sizes in pixels go through `Window.px`, so that the window is right on a screen set to show things larger.
+- **A dialog is made out of sight and shown when ready** (`Window.dialog`, then `Window.present`).
+  A Tk window shown before it has its contents flashes as a small empty frame in a corner of the screen and then jumps; every new dialog must go through those two.
+- **What the window shows first is only what a first run needs.**
+  A new setting goes among the advanced settings (`advanced_frame`), not beside the game; the exception is something a run cannot do without, as the SDK is for a game with no engine.
 - **The window is never shown in tests** (`root.withdraw()`), and tests must replace `gui.default_output`: the real one is in the user's home folder.
 - **Never re-implement the engine.** Parsing, lint, translation lookup and text substitution are done by the game's own Ren'Py, never by our code.
 - **A translation is not at fault for what its original does too.**

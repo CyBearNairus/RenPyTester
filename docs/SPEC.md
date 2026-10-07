@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Version 0.16 **approved** by the project owner on 2026-10-06. Version 0.17 amendments (from building M7) await approval. Versions 0.18 and 0.19 add requirements the owner asked for. |
+| Status | Version 0.16 **approved** by the project owner on 2026-10-06. Version 0.17 amendments (from building M7) await approval. Versions 0.18 to 0.21 add requirements the owner asked for. |
 | Last updated | 2026-10-06 |
 
 This document is the source of truth for what RenPyTester does.
@@ -347,7 +347,7 @@ It is a front end to the same run the command line performs, not a second implem
 | ID | Pri | Requirement |
 | --- | --- | --- |
 | GUI-001 | MUST | Choose the game by browsing for a folder or dropping one on the executable. Once chosen, show what was detected (GAME-006): name, engine version, languages. The game's path can also be typed or pasted. Finding out what the game is runs in the background, as `renpytester info` does it (CLI-008); when the game cannot be started, the window says why. |
-| GUI-002 | MUST | Options shown as plain controls with sensible defaults: stages to run, languages to test, sandbox copy on/off (SAFE-006), and an optional SDK folder when the game needs one. Everything else stays at its default or comes from `renpytester.toml`. The SDK control is shown only for a game that has no engine of its own, and starts with the folder the `RENPY_SDK` environment variable names, if any. There is one box for each language the game has, all ticked at first. *Run* is not available while nothing is ticked to check, or translations are ticked with no language. |
+| GUI-002 | MUST | Options shown as plain controls with sensible defaults: stages to run, languages to test, sandbox copy on/off (SAFE-006), and an optional SDK folder when the game needs one. Everything else stays at its default or comes from `renpytester.toml`. The SDK control is shown only for a game that has no engine of its own, and starts with the folder the `RENPY_SDK` environment variable names, if any. There is one box for each language the game has, all ticked at first. *Run* is not available while nothing is ticked to check, or translations are ticked with no language. All of these but the SDK folder are among the advanced settings (GUI-016). |
 | GUI-003 | MUST | A *Run* button that becomes *Cancel* during a run. Cancelling behaves as Ctrl+C does (CLI-006). Closing the window during a run cancels the run first, and the window closes when the game folder has been restored. |
 | GUI-004 | MUST | During a run: one progress bar, the current stage, and running counts of errors and warnings. No game window appears (ARCH-006). The interface stays responsive. The bar shows how much of the script has been played; until the game reports in, it shows only that work is going on. The controls cannot be changed during a run. Notes and possible issues are counted too. |
 | GUI-005 | MUST | After a run: a pass/fail result, counts by severity, and a button that opens the HTML report in the default browser. A second button opens the folder the reports are in. |
@@ -355,12 +355,14 @@ It is a front end to the same run the command line performs, not a second implem
 | GUI-007 | MUST | Every GUI run can be expressed as a command line; the window shows that command so a developer can copy it into CI. The command has only what differs from the defaults, quoted for the user's own terminal, and the window's language as `--lang`. Given to the command line, it makes a run with the same settings. |
 | GUI-008 | SHOULD | Remember the last game folder and options between sessions. Also the SDK folder and the window's language. They are kept in a file in the user's profile, which the `RENPYTESTER_GUI_STATE` environment variable can move. |
 | GUI-009 | SHOULD | List the findings in the window itself, with file and line, without opening the report. |
-| GUI-010 | SHOULD | Manage cached sandbox copies (SAFE-012). A dialog lists the copies with their size and when they were last used, and deletes the selected ones or all of them. |
-| GUI-011 | MUST | A run started from the window saves its reports in a folder named `renpytester-report` in the user's home folder, unless the game's config file names another (CFG-002). The window says where, and the command it shows has that folder as `--output`. The command line's default, a folder beside wherever the command was typed (REP-005), means nothing to someone who started the program with a double click. |
+| GUI-010 | SHOULD | Manage cached sandbox copies (SAFE-012). A dialog lists the copies with their size and when they were last used, and deletes the selected ones or all of them. The button that opens it is among the advanced settings, under the sandbox option, since the copies concern only someone who has used the sandbox. |
+| GUI-011 | MUST | A run started from the window saves its reports in a folder named `renpytester-report` in the user's home folder, unless the game's config file names another (CFG-002) or the user chooses one. The folder can be typed or browsed for among the advanced settings (GUI-016); the box shows the folder that will be used even when none was chosen, and the choice is remembered (GUI-008). The window also says where the reports are saved, and the command it shows has that folder as `--output`. The command line's default, a folder beside wherever the command was typed (REP-005), means nothing to someone who started the program with a double click. |
 | GUI-012 | MUST | The window's language selector shows each interface language by its name (*English*, *Brazilian Portuguese*), not by its code, and the names themselves follow the language the window is in. The name of every language is in every message file, so that adding a language still needs no change to the code (I18N-008). |
 | GUI-013 | MUST | The program has an icon of its own, original artwork, which the window, its dialogs and the taskbar or dock entry show in place of Python's. The icon files are part of the package, and are made by a development tool from a drawing in code, so that they can be made again. A window that cannot load the icon opens without it. |
 | GUI-014 | MUST | An *About* button opens a dialog with the program's name, icon and version, a credit to its author, CyBearNairus, its licence, and the address of its GitHub repository, which opens in the default browser when clicked. Nothing is fetched from the network unless the user clicks that link (SAFE-008). |
 | GUI-015 | MUST | The window looks like the HTML report (REP-004): the same colours, panels with a thin edge on a quieter background, the sums of errors, warnings, notes and possible issues as large coloured numbers, and each listed finding marked with the colour of its kind. The colours are kept in one place that both use. The window is dark when the system is set to dark, and light otherwise, as the report is in a browser. *Run* is the one coloured button. On a screen set to show things larger, the window is drawn sharp at that size. All of this is done with Tk's own styles and small pictures drawn by the program: no library is added (ARCH-005). |
+| GUI-016 | MUST | The window opens showing only what a first run needs: the game's folder and *Run*. What to check, which languages, the sandbox, the report folder and the equivalent command are *advanced settings*, shown and hidden by one button, and they apply whether shown or not. Whether they are shown is remembered (GUI-008). The SDK folder is not among them: a game with no engine cannot be tested without one, so it is asked for in plain sight, and only for such a game. They are in this order: the game's languages, first because they are the one setting that differs from game to game; what to check; the sandbox, under the label *Sandbox*; the report folder; and the command. |
+| GUI-017 | MUST | A dialog (*About*, the sandbox's copies) opens over the middle of the main window, and appears once, complete: it is built out of sight and shown when ready, so that no empty frame flashes in a corner of the screen first. |
 
 ### 4.15 Interface languages (I18N)
 
@@ -469,7 +471,7 @@ The harness's Python version cannot be chosen with a virtual environment, becaus
 | M4 | Translations (**done** 2026-10-06) | Language discovery and all TL MUSTs. The SHOULD and COULD rows of 4.7 are left for later, except orphan translations (TL-007), which lint already reports. | TL-001–006, -012 |
 | M5 | Reports and config (**done** 2026-10-06) | JUnit, HTML, config file, ignore rules, baseline, the partial report after Ctrl+C and the `info` command. The two SHOULD rows that add more to the config file, stated outcomes of interactions (RUN-022) and user-authored paths (EXP-009), are left for later. | REP-003, -004, -007, -010, CFG-001–007, CLI-005, -006, -008 |
 | M6 | Sandbox (**done** 2026-10-06) | Cached copy with incremental synchronisation, cache commands, and the report of files a game writes by itself. The GUI's part of SAFE-012 comes with M7. | SAFE-006, -007, -009–012 |
-| M7 | Graphical interface (**done** 2026-10-06) | The window described in 4.14. | GUI-001–015, CLI-007, COMPAT-007 |
+| M7 | Graphical interface (**done** 2026-10-06) | The window described in 4.14. | GUI-001–017, CLI-007, COMPAT-007 |
 | M8 | Packaging | Single-file executables, release CI. | DIST |
 | M9 | Hardening | Screen smoke test, performance, acceptance. | UI, NFR, 7.4 |
 
@@ -503,6 +505,8 @@ Settled on 2026-10-06:
 
 | # | Decision |
 | --- | --- |
+| D25 | Asked for by the owner: among the advanced settings the languages come first, the sandbox has a label, and the button for its copies sits under it (GUI-016, GUI-010). The SDK folder stays in plain sight for a game that needs one. |
+| D24 | Asked for by the owner: the window shows only the game at first, with the other choices behind *Show advanced settings* (GUI-016); the report folder can be chosen (GUI-011); and dialogs open centred, without a flash (GUI-017). |
 | D23 | Asked for by the owner: the window is to look modern, like the HTML report (GUI-015). The licence stays GPL-3.0. |
 | D22 | Asked for by the owner: the window's language selector shows names, not codes (GUI-012); the program has an icon (GUI-013); and an *About* dialog gives the version, credits CyBearNairus and links to the repository (GUI-014). |
 | D20 | Version 0.16 amendments approved: SAFE-006, SAFE-007 and SAFE-009 to SAFE-012 made precise. Several game processes share the one sandbox copy, and a game writing its own files is a note, not a finding. |
@@ -551,3 +555,5 @@ Settled on 2026-10-06:
 | 2026-10-06 | 0.17 | M7 built. D20 settled (0.16 approved). Added GUI-011 (where the window saves reports); GUI-001 to GUI-008, GUI-010, CLI-007 and COMPAT-007 made precise. |
 | 2026-10-06 | 0.18 | Owner's requests (D22): added GUI-012 (languages shown by name), GUI-013 (the program's icon) and GUI-014 (the *About* dialog). |
 | 2026-10-06 | 0.19 | Owner's request (D23): added GUI-015 (the window looks like the HTML report, light or dark); GUI-004 counts notes and possible issues too. |
+| 2026-10-06 | 0.20 | Owner's requests (D24): added GUI-016 (advanced settings behind a button) and GUI-017 (dialogs centred, shown once); GUI-011 lets the report folder be chosen; GUI-002 follows. |
+| 2026-10-06 | 0.21 | Owner's requests (D25): GUI-016 gives the order of the advanced settings, languages first; GUI-010 puts the button for the sandbox's copies under the sandbox option. |

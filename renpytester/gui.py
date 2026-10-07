@@ -122,6 +122,10 @@ class Session:
         # The game's languages to check; None is all of them.
         self.languages = None
         self.sandbox = False
+        # Where to save reports; empty is the usual place (GUI-011).
+        self.output = ""
+        # Whether the window shows the settings a first run does not need (GUI-016).
+        self.advanced = False
         # The interface language: the system's, until the window has been used in another.
         self.lang = i18n.detect()
         # What the threads have to tell the window, as tuples whose first part says what kind.
@@ -148,13 +152,16 @@ class Session:
         if isinstance(saved.get("languages"), list):
             self.languages = [name for name in saved["languages"] if isinstance(name, str)]
         self.sandbox = saved.get("sandbox") is True
+        self.advanced = saved.get("advanced") is True
+        if isinstance(saved.get("output"), str):
+            self.output = saved["output"]
         if i18n.normalise(saved.get("lang") if isinstance(saved.get("lang"), str) else None):
             self.lang = i18n.normalise(saved["lang"])
 
     def save(self):
         saved = {
             "game": self.game, "sdk": self.sdk, "stages": self.stages, "languages": self.languages,
-            "sandbox": self.sandbox, "lang": self.lang}
+            "sandbox": self.sandbox, "output": self.output, "advanced": self.advanced, "lang": self.lang}
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self.path.write_text(json.dumps(saved, indent=2), encoding="utf-8")
@@ -179,7 +186,10 @@ class Session:
         """
         given = self.given()
         _options, settings = runner.prepare(self.game, {})
-        if "output" not in settings.settings:
+        # The folder chosen in the window; or the one the game's config file names; or the usual one.
+        if self.output:
+            given["output"] = self.output
+        elif "output" not in settings.settings:
             given["output"] = str(default_output())
         options, _settings = runner.prepare(self.game, given)
 
@@ -389,6 +399,14 @@ def apply_theme(root, colours, px):
         foreground=[("disabled", c["soft"])],
         bordercolor=[("disabled", c["line"])], lightcolor=[("disabled", c["line"]), ("active", c["accent-hover"])],
         darkcolor=[("disabled", c["line"]), ("active", c["accent-hover"])])
+    style.configure(
+        "Link.TButton", foreground=c["accent"], bordercolor=c["card"], padding=(0, px(2)),
+        font=("TkDefaultFont", 10, "underline"))
+    style.map(
+        "Link.TButton", background=[("active", c["card"]), ("pressed", c["card"])],
+        foreground=[("active", c["accent-hover"])], bordercolor=[("focus", c["line"])],
+        lightcolor=[("active", c["card"]), ("pressed", c["card"])],
+        darkcolor=[("active", c["card"]), ("pressed", c["card"])])
     style.configure("Page.TButton", background=c["page"], lightcolor=c["page"], darkcolor=c["page"])
     style.map(
         "Page.TButton", background=[("disabled", c["page"]), ("pressed", c["line"]), ("active", c["card"])],
@@ -477,6 +495,7 @@ class Window:
         self.result = None
         self.status_key = None
         self.icons = load_icons(root)
+        self.planned_output = None
         # Dark or light, as the system is set (GUI-015). The window keeps the one it opened with.
         self.dark = palette.system_is_dark() if dark is None else dark
         self.colours = palette.DARK if self.dark else palette.LIGHT
@@ -497,7 +516,8 @@ class Window:
         self.detected_var = tk.StringVar()
         self.status_var = tk.StringVar()
         self.result_var = tk.StringVar()
-        self.output_var = tk.StringVar()
+        self.output_var = tk.StringVar(value=session.output)
+        self.saved_var = tk.StringVar()
 
         self.build()
         self.retranslate()
@@ -546,13 +566,13 @@ class Window:
 
     def build(self):
         tk, ttk, pad = self.tk, self.ttk, self.px(self.PAD)
-        self.root.minsize(self.px(840), self.px(700))
+        self.root.minsize(self.px(840), self.px(560))
         outer = ttk.Frame(self.root, padding=pad * 2, style="Page.TFrame")
         outer.pack(fill="both", expand=True)
         outer.columnconfigure(0, weight=1)
         wrap = self.px(700)
 
-        # ---- The game and what to check in it (GUI-001, GUI-002)
+        # ---- The game (GUI-001). This is all a first run needs; the rest is one click away (GUI-016).
         game = self.card(outer, row=0, column=0, sticky="ew")
         game.columnconfigure(1, weight=1)
         row = 0
@@ -562,29 +582,47 @@ class Window:
         self.game_entry.bind("<Return>", lambda _event: self.game_chosen())
         self.game_entry.bind("<FocusOut>", lambda _event: self.game_chosen())
         self.game_browse = self.button(game, "gui.browse", self.browse_game)
-        self.game_browse.grid(row=row, column=2)
+        self.game_browse.grid(row=row, column=2, sticky="ew")
         row += 1
         self.detected_label = ttk.Label(game, textvariable=self.detected_var, wraplength=wrap, justify="left")
-        self.detected_label.grid(row=row, column=1, columnspan=2, sticky="w", padx=pad, pady=(self.px(4), pad))
+        self.detected_label.grid(row=row, column=1, columnspan=2, sticky="w", padx=pad, pady=(self.px(4), 0))
         row += 1
 
-        # The SDK, only for a game that needs one. Its widgets are shown and hidden together.
+        # The SDK is not a setting but something a game with no engine cannot be tested without,
+        # so it is asked for here, in plain sight, and only for such a game.
         self.sdk_label = self.label(game, "gui.sdk", style="Soft.TLabel")
-        self.sdk_label.grid(row=row, column=0, sticky="w")
+        self.sdk_label.grid(row=row, column=0, sticky="w", pady=(pad, 0))
         self.sdk_entry = ttk.Entry(game, textvariable=self.sdk_var)
-        self.sdk_entry.grid(row=row, column=1, sticky="ew", padx=pad)
+        self.sdk_entry.grid(row=row, column=1, sticky="ew", padx=pad, pady=(pad, 0))
         self.sdk_entry.bind("<Return>", lambda _event: self.sdk_chosen())
         self.sdk_entry.bind("<FocusOut>", lambda _event: self.sdk_chosen())
         self.sdk_browse = self.button(game, "gui.browse", self.browse_sdk)
-        self.sdk_browse.grid(row=row, column=2)
+        self.sdk_browse.grid(row=row, column=2, sticky="ew", pady=(pad, 0))
         row += 1
         self.sdk_hint = self.label(game, "gui.sdk_hint", wraplength=wrap, justify="left", style="Soft.TLabel")
-        self.sdk_hint.grid(row=row, column=1, columnspan=2, sticky="w", padx=pad, pady=(self.px(4), pad))
+        self.sdk_hint.grid(row=row, column=1, columnspan=2, sticky="w", padx=pad, pady=(self.px(4), 0))
         self.sdk_widgets = (self.sdk_label, self.sdk_entry, self.sdk_browse, self.sdk_hint)
         row += 1
 
-        self.label(game, "gui.checks", style="Soft.TLabel").grid(row=row, column=0, sticky="nw", pady=(self.px(3), 0))
-        checks = ttk.Frame(game)
+        self.advanced_button = ttk.Button(game, command=self.toggle_advanced, style="Link.TButton")
+        self.advanced_button.grid(row=row, column=0, columnspan=3, sticky="w", pady=(pad, 0))
+        row += 1
+
+        # ---- The settings a first run does not need (GUI-002, GUI-016)
+        advanced = self.advanced_frame = ttk.Frame(game)
+        advanced.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(pad, 0))
+        advanced.columnconfigure(1, weight=1)
+        row = 0
+        # The languages come first: they are the one setting that is the game's own, and differ
+        # from one game to the next. A game in one language has none, and the row is not shown.
+        self.languages_label = self.label(advanced, "gui.languages", style="Soft.TLabel")
+        self.languages_label.grid(row=row, column=0, sticky="nw", pady=(self.px(3), self.px(4)))
+        self.languages_frame = ttk.Frame(advanced)
+        self.languages_frame.grid(row=row, column=1, columnspan=2, sticky="w", padx=pad, pady=(0, self.px(4)))
+        row += 1
+        self.label(advanced, "gui.checks", style="Soft.TLabel").grid(
+            row=row, column=0, sticky="nw", pady=(self.px(3), 0))
+        checks = ttk.Frame(advanced)
         checks.grid(row=row, column=1, columnspan=2, sticky="w", padx=pad)
         self.stage_checks = []
         for column, name in enumerate(runner.STAGES):
@@ -592,17 +630,29 @@ class Window:
             widget.grid(row=0, column=column, sticky="w", padx=(0, pad * 2))
             self.stage_checks.append(widget)
         row += 1
-        self.languages_label = self.label(game, "gui.languages", style="Soft.TLabel")
-        self.languages_label.grid(row=row, column=0, sticky="nw", pady=(self.px(7), 0))
-        self.languages_frame = ttk.Frame(game)
-        self.languages_frame.grid(row=row, column=1, columnspan=2, sticky="w", padx=pad, pady=(self.px(4), 0))
-        row += 1
-        self.sandbox_check = self.check(game, "gui.sandbox", self.sandbox_var, self.choices_changed)
+        # The sandbox, and under it the copies it keeps (SAFE-006, GUI-010): nobody needs the
+        # second who has not used the first.
+        self.label(advanced, "gui.sandbox_label", style="Soft.TLabel").grid(
+            row=row, column=0, sticky="nw", pady=(self.px(7), 0))
+        self.sandbox_check = self.check(advanced, "gui.sandbox", self.sandbox_var, self.choices_changed)
         self.sandbox_check.grid(row=row, column=1, columnspan=2, sticky="w", padx=pad, pady=(self.px(4), 0))
+        row += 1
+        self.cache_button = self.button(advanced, "gui.cache", self.show_cache)
+        self.cache_button.grid(row=row, column=1, sticky="w", padx=pad, pady=(self.px(4), 0))
+        row += 1
+
+        # Where the reports go (GUI-011).
+        self.label(advanced, "gui.output", style="Soft.TLabel").grid(row=row, column=0, sticky="w", pady=(pad, 0))
+        self.output_entry = ttk.Entry(advanced, textvariable=self.output_var)
+        self.output_entry.grid(row=row, column=1, sticky="ew", padx=pad, pady=(pad, 0))
+        self.output_entry.bind("<Return>", lambda _event: self.output_chosen())
+        self.output_entry.bind("<FocusOut>", lambda _event: self.output_chosen())
+        self.output_browse = self.button(advanced, "gui.browse", self.browse_output)
+        self.output_browse.grid(row=row, column=2, sticky="ew", pady=(pad, 0))
         row += 1
 
         # The same run as a command (GUI-007), across the whole card.
-        command = ttk.Frame(game)
+        command = ttk.Frame(advanced)
         command.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(pad * 1.5, 0))
         command.columnconfigure(0, weight=1)
         self.label(command, "gui.command", style="Soft.TLabel").grid(row=0, column=0, columnspan=2, sticky="w")
@@ -610,6 +660,10 @@ class Window:
             command, textvariable=self.command_var, state="readonly", font=("TkFixedFont", 9))
         self.command_entry.grid(row=1, column=0, sticky="ew", padx=(0, pad), pady=(self.px(3), 0))
         self.button(command, "gui.copy", self.copy_command).grid(row=1, column=1, pady=(self.px(3), 0))
+        # The first column is as wide in both parts of the card, so that everything lines up.
+        for part in (game, advanced):
+            part.grid_columnconfigure(0, minsize=self.px(120))
+            part.grid_columnconfigure(2, minsize=self.px(110))
 
         # ---- Running, and how it went (GUI-003, GUI-004, GUI-005, GUI-006)
         running = self.card(outer, row=1, column=0, sticky="ew", pady=(pad * 1.5, 0))
@@ -648,7 +702,7 @@ class Window:
         self.report_button.grid(row=0, column=1, padx=(pad, 0), sticky="e")
         self.folder_button = self.button(result, "gui.open_folder", self.open_report_folder)
         self.folder_button.grid(row=0, column=2, padx=(pad, 0), sticky="e")
-        ttk.Label(result, textvariable=self.output_var, wraplength=wrap, justify="left", style="Soft.TLabel").grid(
+        ttk.Label(result, textvariable=self.saved_var, wraplength=wrap, justify="left", style="Soft.TLabel").grid(
             row=1, column=0, columnspan=3, sticky="w", pady=(self.px(2), 0))
 
         # ---- The findings (GUI-009)
@@ -657,7 +711,7 @@ class Window:
         found.configure(padding=0)
         found.columnconfigure(0, weight=1)
         found.rowconfigure(0, weight=1)
-        self.findings = ttk.Treeview(found, columns=("kind", "where", "what"), show="tree headings", height=7)
+        self.findings = ttk.Treeview(found, columns=("kind", "where", "what"), show="tree headings", height=4)
         self.findings.column("#0", width=self.px(22), minwidth=self.px(22), stretch=False)
         self.findings.column("kind", width=self.px(120), stretch=False)
         self.findings.column("where", width=self.px(250), stretch=False)
@@ -671,7 +725,7 @@ class Window:
         self.markers = {kind: self.marker(self.colours[kind]) for kind in (ERROR, WARNING, INFO, POSSIBLE)}
         outer.rowconfigure(2, weight=1)
 
-        # ---- The window's own language, the copies the sandbox keeps, and about (I18N-002, GUI-010, GUI-014)
+        # ---- The window's own language, and about (I18N-002, GUI-014)
         bottom = ttk.Frame(outer, style="Page.TFrame")
         bottom.grid(row=3, column=0, sticky="ew", pady=(pad * 1.5, 0))
         bottom.columnconfigure(2, weight=1)
@@ -680,9 +734,7 @@ class Window:
         self.lang_box = ttk.Combobox(bottom, textvariable=self.lang_var, state="readonly", width=24)
         self.lang_box.grid(row=0, column=1, padx=pad)
         self.lang_box.bind("<<ComboboxSelected>>", lambda _event: self.language_chosen())
-        self.cache_button = self.button(bottom, "gui.cache", self.show_cache, style="Page.TButton")
-        self.cache_button.grid(row=0, column=3)
-        self.button(bottom, "gui.about", self.show_about, style="Page.TButton").grid(row=0, column=4, padx=(pad, 0))
+        self.button(bottom, "gui.about", self.show_about, style="Page.TButton").grid(row=0, column=3)
 
     def retranslate(self):
         """Puts every text of the window in the interface language (I18N-001)."""
@@ -818,7 +870,11 @@ class Window:
             else:
                 try:
                     options, command = session.plan()
-                    self.output_var.set(t("gui.reports_in", path=options.output))
+                    self.saved_var.set(t("gui.reports_in", path=options.output))
+                    # The box shows where reports will really go, also when that was not chosen here.
+                    if not session.output and not self.typing_in(self.output_entry):
+                        self.output_var.set(options.output)
+                    self.planned_output = options.output
                     ready = True
                 except ToolError as error:
                     reason = t(error.message_id, **error.params)
@@ -831,17 +887,62 @@ class Window:
                 widget.grid()
             else:
                 widget.grid_remove()
+        if session.advanced:
+            self.advanced_frame.grid()
+        else:
+            self.advanced_frame.grid_remove()
+        self.advanced_button.configure(text=t("gui.advanced.hide" if session.advanced else "gui.advanced.show"))
+        self.fit()
         self.run_button.configure(
             text=t("gui.cancel") if busy else t("gui.run"),
             state="normal" if (busy and not session.stop.is_set()) or (ready and not busy) else "disabled")
         state = "disabled" if busy else "normal"
         for widget in (
                 self.game_entry, self.game_browse, self.sdk_entry, self.sdk_browse, self.sandbox_check,
-                self.cache_button, *self.stage_checks, *self.languages_frame.winfo_children()):
+                self.output_entry, self.output_browse, self.cache_button, *self.stage_checks,
+                *self.languages_frame.winfo_children()):
             widget.configure(state=state)
         self.lang_box.configure(state="disabled" if busy else "readonly")
         for widget in (self.report_button, self.folder_button):
             widget.configure(state="normal" if self.paths and not busy else "disabled")
+
+    def typing_in(self, widget):
+        """True while the keyboard is in `widget`: what is being typed there must not be replaced."""
+        try:
+            return self.root.focus_get() is widget
+        except KeyError:
+            return False  # The keyboard is in a list Tk made by itself, such as a drop-down.
+
+    def fit(self):
+        """Makes the window tall enough for what it now shows. It is never made smaller: how much
+        room the list of findings gets beyond that is the user's to decide."""
+        root = self.root
+        root.update_idletasks()
+        # As tall as its contents ask for, but never taller than the screen has room for.
+        needed = min(root.winfo_reqheight(), root.winfo_screenheight() - self.px(90))
+        root.minsize(self.px(840), max(self.px(560), needed))
+        if root.winfo_viewable() and root.winfo_height() < needed:
+            root.geometry("%dx%d" % (root.winfo_width(), needed))
+
+    def toggle_advanced(self):
+        self.session.advanced = not self.session.advanced
+        self.refresh()
+
+    def browse_output(self):
+        from tkinter import filedialog
+
+        chosen = filedialog.askdirectory(title=t("gui.choose_output"), mustexist=False)
+        if chosen:
+            self.output_var.set(str(Path(chosen)))
+            self.output_chosen()
+
+    def output_chosen(self):
+        """Takes the report folder typed or browsed for. An empty box, or the folder that would be
+        used anyway, means no choice was made: the game's config file, or the usual place, decides."""
+        chosen = self.output_var.get().strip().strip('"')
+        usual = self.planned_output if not self.session.output else None
+        self.session.output = "" if not chosen or chosen == usual else chosen
+        self.refresh()
 
     def copy_command(self):
         self.root.clipboard_clear()
@@ -984,22 +1085,41 @@ class Window:
     # ------------------------------------------------------- the sandbox's copies (GUI-010)
 
     def dialog(self, title):
-        """A second window in the same dress as the first. Returns (the window, the card to fill)."""
+        """A second window in the same dress as the first. Returns (the window, the card to fill).
+
+        It is made out of sight, and stays so until `present` is called for it. A window shown
+        before it has its contents appears for a moment as a small empty frame in a corner of the
+        screen, then jumps to its place (GUI-017).
+        """
         window = self.tk.Toplevel(self.root, background=self.colours["page"])
+        window.withdraw()
         window.title(title)
-        window.transient(self.root)
         set_icon(window, self.icons)
-        if self.dark:
-            # The frame is only drawn dark if it is told to be before the window is first shown.
-            window.withdraw()
-            dark_title_bar(window)
-            if self.root.winfo_viewable():
-                window.after_idle(window.deiconify)
         page = self.ttk.Frame(window, padding=self.px(self.PAD) * 2, style="Page.TFrame")
         page.pack(fill="both", expand=True)
         page.columnconfigure(0, weight=1)
         page.rowconfigure(0, weight=1)
         return window, self.card(page, row=0, column=0, sticky="nsew")
+
+    def present(self, window):
+        """Shows a dialog that is ready, over the middle of the main window (GUI-017)."""
+        root = self.root
+        window.update_idletasks()
+        width, height = window.winfo_reqwidth(), window.winfo_reqheight()
+        # Both windows wear the same frame, so lining up their outer corners lines up their middles.
+        x = root.winfo_x() + (root.winfo_width() - width) // 2
+        y = root.winfo_y() + (root.winfo_height() - height) // 2
+        # Never off the screen, whatever the main window is doing.
+        x = max(0, min(x, root.winfo_screenwidth() - width))
+        y = max(0, min(y, root.winfo_screenheight() - height))
+        window.geometry("+%d+%d" % (x, y))
+        window.transient(root)
+        if self.dark:
+            dark_title_bar(window)  # The frame is only drawn dark if told to be before it is shown.
+        if root.winfo_viewable():
+            window.deiconify()
+            window.focus_set()
+        return window
 
     def show_cache(self):
         ttk, pad = self.ttk, self.px(self.PAD)
@@ -1039,7 +1159,7 @@ class Window:
         ttk.Button(buttons, text=t("gui.cache.delete_all"), command=lambda: delete(True)).pack(side="left", padx=pad)
         ttk.Button(buttons, text=t("gui.close"), command=dialog.destroy).pack(side="right")
         fill()
-        return dialog
+        return self.present(dialog)
 
     # ---------------------------------------------------------------- about (GUI-014)
 
@@ -1070,7 +1190,7 @@ class Window:
         link.grid(row=5, column=0, columnspan=2, sticky="w", pady=(pad, 0))
         ttk.Button(frame, text=t("gui.close"), command=dialog.destroy).grid(
             row=6, column=0, columnspan=2, sticky="e", pady=(pad * 2, 0))
-        return dialog
+        return self.present(dialog)
 
     @staticmethod
     def open_link(address):

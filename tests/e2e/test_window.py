@@ -136,7 +136,7 @@ def test_choosing_a_game_shows_what_it_is_and_offers_its_languages(open_window, 
     # A project needs an SDK, so the window asks for one; here it already has it.
     assert all(widget.winfo_manager() == "grid" for widget in window.sdk_widgets)
     assert driver.state(window.run_button) == "normal"
-    assert window.output_var.get().startswith("Reports are saved in ")
+    assert window.saved_var.get().startswith("Reports are saved in ")
     assert folder_digest(game) == before
 
     # Something that is not a game is said so in the window, and cannot be run.
@@ -453,6 +453,110 @@ def test_about_gives_the_version_the_author_and_the_repository(open_window, monk
     link.invoke()
     assert opened == ["https://github.com/CyBearNairus/RenPyTester"]
     dialog.destroy()
+
+
+@pytest.mark.req("GUI-016", "GUI-002", "GUI-008")
+def test_window_opens_with_only_the_game_and_keeps_the_rest_one_click_away(open_window, game_copy):
+    driver = open_window()
+    window, session = driver.window, driver.session
+    driver.choose(game_copy("tl_untranslated"))
+
+    # At first: the game, and the SDK because this game needs one. Nothing else to decide.
+    advanced = inside(window.advanced_frame)
+    assert window.advanced_frame.winfo_manager() == ""
+    assert window.advanced_button["text"] == "Show advanced settings"
+    assert window.game_entry.winfo_manager() == "grid" and window.sdk_entry.winfo_manager() == "grid"
+    for widget in (window.sandbox_check, window.output_entry, window.command_entry, window.cache_button,
+                   *window.stage_checks):
+        assert widget in advanced
+    # In this order: the game's languages, what to check, the sandbox with its copies under it, the reports.
+    rows = [int(widget.grid_info()["row"]) for widget in (
+        window.languages_frame, window.stage_checks[0].master, window.sandbox_check, window.cache_button,
+        window.output_entry)]
+    assert rows == sorted(rows) and len(set(rows)) == len(rows)
+    labels = {int(w.grid_info()["row"]): w["text"] for w in window.advanced_frame.winfo_children()
+              if w.winfo_class() == "TLabel" and int(w.grid_info()["column"]) == 0}
+    assert labels[rows[2]] == "Sandbox:"
+    assert window.game_entry not in advanced and window.sdk_entry not in advanced
+    assert window.run_button not in advanced
+    # The settings are in force though out of sight: the run is ready, with everything ticked.
+    assert driver.state(window.run_button) == "normal"
+    assert session.stages == list(runner.STAGES)
+
+    window.advanced_button.invoke()
+    assert window.advanced_frame.winfo_manager() == "grid"
+    assert window.advanced_button["text"] == "Hide advanced settings"
+    assert sorted(window.language_vars) == ["portuguese", "spanish"]
+
+    # A choice made there stays made when they are put away again, and both are remembered.
+    window.stage_vars["lint"].set(False)
+    window.choices_changed()
+    window.advanced_button.invoke()
+    assert window.advanced_frame.winfo_manager() == ""
+    assert "--stages routes,translations" in window.command_var.get()
+    window.advanced_button.invoke()
+    window.close()
+    remembered = gui.Session()
+    remembered.load()
+    assert (remembered.advanced, remembered.stages) == (True, ["routes", "translations"])
+
+
+@pytest.mark.req("GUI-011", "GUI-007", "GUI-008", "REP-005")
+def test_report_folder_can_be_chosen_in_the_window(open_window, game_copy, tmp_path):
+    driver = open_window()
+    window, session = driver.window, driver.session
+    driver.choose(game_copy("clean"))
+    window.stage_vars["lint"].set(False)
+    window.stage_vars["translations"].set(False)
+    window.choices_changed()
+
+    # The box shows where reports will go even though nobody has chosen.
+    usual = str(tmp_path / "report")
+    assert window.output_var.get() == usual
+    assert session.output == ""
+    assert window.saved_var.get() == "Reports are saved in " + usual
+
+    chosen = tmp_path / "my own reports"
+    window.output_var.set(str(chosen))
+    window.output_chosen()
+    assert session.output == str(chosen)
+    assert window.saved_var.get() == "Reports are saved in " + str(chosen)
+    assert "--output" in window.command_var.get() and "my own reports" in window.command_var.get()
+
+    driver.run()
+    assert window.result_var.get().startswith("PASSED")
+    assert window.paths["html"].parent == chosen
+    assert len(list(chosen.glob("report-*.html"))) == 1
+    assert not (tmp_path / "report").exists()
+    remembered = gui.Session()
+    remembered.load()
+    assert remembered.output == str(chosen)
+
+    # An emptied box is no choice: back to the usual place.
+    window.output_var.set("")
+    window.output_chosen()
+    assert (session.output, window.output_var.get()) == ("", usual)
+
+
+@pytest.mark.req("GUI-017")
+def test_dialogs_are_built_out_of_sight_and_placed_over_the_middle_of_the_window(open_window):
+    driver = open_window()
+    window, root = driver.window, driver.root
+    root.geometry("900x700+240+130")
+    root.update()
+
+    for show in (window.show_about, window.show_cache):
+        dialog = show()
+        # Out of sight until ready; and here it stays so, since the tests never show the window.
+        assert dialog.state() == "withdrawn"
+        # Its place is already set: its middle over the main window's.
+        dialog.update_idletasks()
+        x, y = (int(part) for part in dialog.geometry().split("+")[1:])
+        width, height = dialog.winfo_reqwidth(), dialog.winfo_reqheight()
+        assert x == max(0, min(root.winfo_x() + (root.winfo_width() - width) // 2, root.winfo_screenwidth() - width))
+        assert y == max(
+            0, min(root.winfo_y() + (root.winfo_height() - height) // 2, root.winfo_screenheight() - height))
+        dialog.destroy()
 
 
 @pytest.mark.req("GUI-015")

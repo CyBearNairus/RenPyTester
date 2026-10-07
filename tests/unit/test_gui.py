@@ -93,6 +93,28 @@ def test_window_leaves_everything_else_to_the_config_file(game, tmp_path):
     assert from_command_line(command)[0] == options
 
 
+@pytest.mark.req("GUI-011", "GUI-007", "CFG-002")
+def test_report_folder_is_the_one_chosen_then_the_config_files_then_the_usual_one(game, tmp_path):
+    session = gui.Session(tmp_path / "state.json")
+    session.game, session.lang = str(game), "en"
+    # Nothing chosen, nothing in a config file: the usual place.
+    assert session.plan()[0].output == str(tmp_path / "reports")
+
+    # Chosen in the window: that folder, and the command says so.
+    session.output = str(tmp_path / "chosen here")
+    options, command = session.plan()
+    assert options.output == str(tmp_path / "chosen here")
+    assert from_command_line(command)[0] == options
+
+    # A config file names a folder: it is used when none is chosen, and gives way when one is.
+    (game / "renpytester.toml").write_text('output = "from-the-file"\n', encoding="utf-8")
+    assert session.plan()[0].output == str(tmp_path / "chosen here")
+    session.output = ""
+    options, command = session.plan()
+    assert options.output == str((game / "from-the-file").resolve())
+    assert "--output" not in command
+
+
 @pytest.mark.req("GUI-006", "CFG-004")
 def test_what_stops_a_run_is_an_error_with_a_message_not_a_crash(game, tmp_path):
     session = gui.Session(tmp_path / "state.json")
@@ -114,12 +136,14 @@ def test_choices_are_remembered_between_sessions(game, tmp_path):
     first = gui.Session(path)
     first.game, first.sdk, first.stages = str(game), "C:/sdk", ["routes"]
     first.languages, first.sandbox, first.lang = ["french"], True, "pt-BR"
+    first.output, first.advanced = "D:/my reports", True
     first.save()
 
     second = gui.Session(path)
     second.load()
     assert (second.game, second.sdk, second.stages) == (str(game), "C:/sdk", ["routes"])
     assert (second.languages, second.sandbox, second.lang) == (["french"], True, "pt-BR")
+    assert (second.output, second.advanced) == ("D:/my reports", True)
 
     # A file that is damaged, or was written by something else, is passed over.
     for text in ("not json", "[]", json.dumps({"game": 5, "stages": "all", "lang": "fr", "sandbox": "yes"})):
@@ -127,6 +151,7 @@ def test_choices_are_remembered_between_sessions(game, tmp_path):
         third = gui.Session(path)
         third.load()
         assert (third.game, third.stages, third.sandbox) == ("", list(runner.STAGES), False)
+        assert (third.output, third.advanced) == ("", False)
         assert third.lang in i18n.LANGUAGES
 
 

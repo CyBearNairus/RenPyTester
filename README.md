@@ -28,11 +28,12 @@ python -m renpytester
 ```
 
 A window opens.
-Choose the game's folder, tick what you want checked, and press *Run*.
+Choose the game's folder and press *Run*.
+*Show advanced settings* lets you choose what is checked, which languages, whether to test a copy of the game, and where the reports are saved.
 The window shows the progress, then whether the game passed, the problems found with their file and line, and a button that opens the full report.
 *Cancel* stops a run and puts the game folder back as it was.
 The window also shows the command that makes the same run from a terminal, to copy into a script or a build server.
-Its reports are saved in a folder named `renpytester-report` in your home folder.
+Its reports are saved in a folder named `renpytester-report` in your home folder, unless you choose another among the advanced settings.
 
 `python -m renpytester gui PATH_TO_GAME` opens the window with that game already chosen.
 On some Linux systems Python comes without the part that draws windows; RenPyTester then tells you which package to install, and everything below still works.
