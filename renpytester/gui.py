@@ -175,7 +175,8 @@ class Session:
         given = {"sdk": self.sdk or None, "sandbox": True if self.sandbox else None}
         if tuple(self.stages) != runner.STAGES:
             given["stages"] = tuple(name for name in runner.STAGES if name in self.stages)
-        if self.languages is not None and runner.TRANSLATIONS in self.stages:
+        # The languages are of use to the checks that are made in each of them.
+        if self.languages is not None and {runner.TRANSLATIONS, runner.SCREENS} & set(self.stages):
             given["languages"] = tuple(self.languages)
         return given
 
@@ -625,9 +626,10 @@ class Window:
         checks = ttk.Frame(advanced)
         checks.grid(row=row, column=1, columnspan=2, sticky="w", padx=pad)
         self.stage_checks = []
-        for column, name in enumerate(runner.STAGES):
+        for index, name in enumerate(runner.STAGES):
             widget = self.check(checks, "gui.stage." + name, self.stage_vars[name], self.choices_changed)
-            widget.grid(row=0, column=column, sticky="w", padx=(0, pad * 2))
+            # Two to a row: all of them side by side would make the window wider than it need be.
+            widget.grid(row=index // 2, column=index % 2, sticky="w", padx=(0, pad * 2))
             self.stage_checks.append(widget)
         row += 1
         # The sandbox, and under it the copies it keeps (SAFE-006, GUI-010): nobody needs the

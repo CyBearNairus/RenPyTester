@@ -13,6 +13,9 @@ You are told which lines of dialogue and which other texts have no translation y
 You are also told about translations with a broken text tag, translations that show different `[variables]` from the original, and languages the game cannot be switched to.
 As the story is played, every translation of each line is tried out in the state the game is really in, so a translation that uses a variable the game does not have is found without playing the game again in each language.
 
+The menu screens are checked as well, since playing the story never opens them: the main menu, preferences, save, load, history, about, help and the yes-or-no question.
+Each one the game has is put together the way the engine does before showing it, in every language, and you are told about one that fails, one with a broken text tag, and one that shows a picture whose file is missing.
+
 This is an early version.
 
 ## Getting it
@@ -110,6 +113,7 @@ A setting the tool does not know is reported as a mistake, never skipped.
 
 ```toml
 # Any option, by its name with underscores.
+# The checks are lint, routes, translations and screens; all four are made unless you say otherwise.
 stages = ["lint", "routes"]
 max_time = 300
 fail_on = "warning"

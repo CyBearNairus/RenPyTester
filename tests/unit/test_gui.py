@@ -79,6 +79,12 @@ def test_window_shows_the_command_that_makes_the_same_run(game, tmp_path):
     assert options.languages is None and "--languages" not in command
     assert from_command_line(command)[0] == options
 
+    # The menu screens are built in each language too (UI-002).
+    session.stages = ["screens"]
+    options, command = session.plan()
+    assert (options.stages, options.languages) == (("screens",), ("french", "spanish"))
+    assert from_command_line(command)[0] == options
+
 
 @pytest.mark.req("GUI-002", "GUI-007", "CFG-002")
 def test_window_leaves_everything_else_to_the_config_file(game, tmp_path):

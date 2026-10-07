@@ -6,8 +6,9 @@ Runnable from source with plain Python or as a single-file executable, from a te
 ## Current state
 
 **Milestones M0 (spikes), M1 (walking skeleton), M2 (lint stage), M3a (exploration), M3b (checks that need no rendering), M3c (getting past minigames), M3d (label runs), M3e (parallel processes) and M4 (translations) are done.**
-**M5 (reports and config), M6 (sandbox), M7 (graphical interface) and M8 (packaging) are done too. M9 (hardening) is next.**
-[docs/SPEC.md](docs/SPEC.md) version 0.24 is approved, and nothing in it is waiting for the owner.
+**M5 (reports and config), M6 (sandbox), M7 (graphical interface), M8 (packaging) and M9 (hardening) are done too: every milestone of the spec is built.**
+[docs/SPEC.md](docs/SPEC.md) version 0.24 is approved; the version 0.25 amendments, from building M9, wait for the owner (decision D28).
+What the spec still lists and nobody has built are SHOULD and COULD rows only; `tests/unit/test_project.py` fails when a MUST requirement is named by no test.
 What works today: `python -m renpytester GAME` finds the game and its engine and explores every choice of every menu with no window, using in-memory snapshots, and carries on after a crash or a hang.
 While playing it checks for undefined images, missing image, audio and movie files, broken text tags and menus with nothing to choose.
 It also runs the engine's lint and turns its report into findings, merged with what playing found.
@@ -19,6 +20,9 @@ With `--jobs` above 1 (the default on most computers) the label runs are shared 
 For each language the game has, it reports lines and texts with no translation, broken text tags in translations, translations whose `[variables]` differ from the original's, and a language that cannot be switched to.
 These are checked by a game process of its own that plays nothing.
 While the story is played, every translation of each line is also tried out in the state the game is in, for all languages at once, so no route is played again for a language.
+The `screens` stage builds the standard menu screens the game defines (main menu, preferences, save, load, history, about, help, confirm) without drawing them.
+It does so in the game's own language and in each language checked, in another game process that plays nothing.
+A screen that cannot be built is a `screen-error`, and one that can is looked over for broken text tags and missing picture files.
 Every run writes three reports under the same name: JSON, JUnit XML and a self-contained HTML page.
 Settings can be kept in a `renpytester.toml` in the game folder: any option, ignore rules, severities, answers for particular prompts, starting values for game variables, and labels not to play.
 `--baseline` leaves out what an earlier report already had, Ctrl+C still writes a report of what was found, and `renpytester info GAME` says what a game is without playing it.
@@ -96,9 +100,18 @@ The ones that cause real damage if forgotten:
 - **Never re-implement the engine.** Parsing, lint, translation lookup and text substitution are done by the game's own Ren'Py, never by our code.
 - **A translation is not at fault for what its original does too.**
   Text such as `"Page {}"` is filled in by Python and reads as a broken tag in every language; a translated line is reported only when the original passes the same check.
-- **Switching language is done only in the translations process, never in one that plays.**
+- **Switching language is done only in a process that plays nothing, never in one that plays.**
+  There are two: the translations process and the screens process.
   A language's `translate python` code changes the game's state, which would change what exploring the story finds.
+- **The screens process builds screens and never draws or plays.**
+  It works from the engine's start callback, before the story's first statement, and ends there.
+  A screen is built with `update()` and then asked what the engine asks as an interaction starts (`per_interact`); nothing may be added that needs a frame drawn.
+  The engine has no renderer in a run, and the standard preferences screen asks it how big the window is, so `NoRenderer` stands in while a screen is built and is taken away again: left in place, the engine would try to shut it down as it quits.
+- **A menu screen is not at fault in a language for what it does in the game's own.**
+  A screen that fails in the game's own language is reported once, and its text tags and files are checked in that language only; translated texts have their tags checked by the translations stage.
 - **Harness talks to the orchestrator through a JSON-lines file**, never stdout.
+- **In the harness, every script file name goes through `script_file`.**
+  Ren'Py 8.0 names a script loaded compiled from an archive `script.rpyc`, not `game/script.rpy`; a name used as the engine gives it puts findings in the wrong file for such a game.
 - **Hook only what every supported engine version has.** Ren'Py 8.0 and 8.6 differ internally (8.0 has no `Context.handle_exception`, and `renpy.error` seen from a game script is a function, not the module).
   Any harness change must pass the test suite on both the oldest and the newest SDK.
 - **A failed end-to-end test keeps its logs** under `.cache/failures/<test name>/`, because some failures depend on timing inside the engine and do not come back on the next run.
@@ -111,7 +124,7 @@ The ones that cause real damage if forgotten:
   The same symptom (15 paths that all end in `quit`) had a second cause: on Windows the engine enters safe mode when Shift is down as it starts, and shows its renderer screen.
   The harness switches safe mode off; the `safe_mode` fixture reproduces it without touching the keyboard.
 - **Results must not depend on `--jobs` or on timing.**
-  Only work whose result does not depend on order may be given to another process: label runs and lint, never part of the story's exploration.
+  Only work whose result does not depend on order may be given to another process: label runs, lint, and the checks of translations and of menu screens, never part of the story's exploration.
   Findings are collected and put into the report in a fixed order when everything has finished, and everything a label run keeps in memory is reset when it starts.
 - **Game processes start one at a time, and only then run together.**
   A game can rewrite its own script files as it starts (the Tutorial does), and a process that reads the script meanwhile loads a game with labels missing.
@@ -162,6 +175,8 @@ The ones that cause real damage if forgotten:
 - **The Question** and **Tutorial** ship inside the Ren'Py SDK and are the known-good baselines.
 - Fixture games under `tests/fixtures/games/` are original content, one seeded bug each.
   Those whose name starts with `tl_` have a translation under `game/tl/`.
+  Those whose name starts with `screen_` have menu screens in a `screens.rpy` of their own; a fixture without one defines no menu screen, so the screens stage has nothing to build in it.
+- The game of 50,000 words that speed is measured on is not a fixture: `tests/e2e/big_game.py` writes it when the test runs.
   The identifier of a translated line (`start_76f3b19b`) is worked out by the engine from the line's text.
   After changing a line in such a fixture, run the SDK's `translate` command on a copy to get the new identifier, and never commit the `common.rpy` that command also writes.
 
@@ -193,7 +208,8 @@ Paths to these come from environment variables.
 - Run it: `python -m renpytester GAME --sdk .cache/sdk/renpy-8.6.0-sdk` (`--sdk` is only needed for a project that has no engine of its own).
 - Tests: `python -m pytest` runs everything; `python -m pytest tests/unit` needs no engine.
   End-to-end tests use the SDK in the `RENPY_SDK` environment variable, or the newest one under `.cache/sdk/`, and are skipped if there is none.
-  The `run` fixture passes `--jobs 1` unless the test gives its own, so that results do not depend on the machine.
+  The `run` fixture, in `tests/e2e/conftest.py`, passes `--jobs 1` unless the test gives its own, so that results do not depend on the machine.
+  The test of speed (`tests/e2e/test_acceptance.py`) takes over a minute; its limits on time are not applied on a build server, where the `CI` environment variable is set.
 - Tests on the oldest engine: set `RENPY_SDK` to `.cache/sdk/renpy-8.0.3-sdk` and run `python -m pytest` again.
   Do this for every harness change.
 - Linters: `python -m flake8 .`, `python tools/lint_rpy.py`, `npx markdownlint-cli2 "**/*.md"`.
@@ -209,6 +225,7 @@ Paths to these come from environment variables.
 - `renpytester/`: the orchestrator.
   `cli` parses options, `discovery` finds the game and engine, `workspace` prepares and restores the game folder, and `launcher` runs the engine invisibly.
   `lint` reads the engine's lint report, `routes` adds up coverage and tracks unexplored branches, `runner` ties a run together, and `model` holds findings and the report.
+  A stage is a name in `runner.STAGES`; the command line, the window and the three reports take the stages from there, so a new one needs only its messages (`console.stage.NAME`, `gui.stage.NAME`).
   `config` reads `renpytester.toml`, `sandbox` keeps the cached copies, `gui` is the window, `i18n` and `locale/` hold every user-facing string, and `report/` writes output.
   The JUnit and HTML writers take the JSON report's data, never the `Report` object: what is not in the JSON cannot be in them.
 - `renpytester/harness/zzz_renpytester_harness.rpy`: the script injected into the game.

@@ -63,7 +63,7 @@ Each stage has a `status`:
 | `not_run` | The stage did not run. |
 | `not_selected` | The stage was left out with `--stages`. |
 | `failed` | The stage could not finish, for a reason given in `reason`. The report is then not complete. |
-| `not_implemented` | This version of RenPyTester does not have the stage yet. It was not checked. |
+| `not_implemented` | This version of RenPyTester does not have the stage yet. It was not checked. No stage has this status since the `screens` stage was built; reports of earlier versions do. |
 | `interrupted` | The user stopped the run before the stage finished. The report is then not complete. |
 
 The `lint` stage also has `findings` (how many it produced) and, on engine versions that lack some lint checks, `unsupported_options`.
@@ -93,6 +93,18 @@ The `translations` stage also has:
 - `strings_from_source`: present, and `false`, only when the game has no script source files.
   Text marked for translation in screens and Python could then not be listed, and `strings` counts menu choices only.
 
+The `screens` stage also has:
+
+- `screens`: the names of the menu screens that were built, of the eight the engine knows by name: `main_menu`, `preferences`, `save`, `load`, `history`, `about`, `help` and `confirm`.
+  The array is empty for a game that defines none of them.
+- `skipped`: the names of menu screens the game defines that were not built, because they ask for values that only the game knows.
+- `languages`: the languages the screens were built in, in the order they were tried.
+  The first is the game's own language, which is `null` unless the game names its language.
+- `not_switched`: languages the screens were not built in, because the game could not be switched to them.
+- `findings`: how many findings in the report belong to this stage.
+
+Its status is `blocked` when the game fails as a new game starts, before any screen can be built; a `load-failure` finding says why.
+
 ## `coverage`
 
 | Field | Type | Meaning |
@@ -115,7 +127,7 @@ The `translations` stage also has:
 | `file`, `line` | string, integer, or null | Where in the game's script, relative to the game folder. |
 | `label` | string or null | The label being played. |
 | `stage` | string | The stage that found it. |
-| `language` | string or null | The game language the finding is about: set for findings in or about a translation, `null` for the game's own language. |
+| `language` | string or null | The game language the finding is about: set for findings in or about a translation, and for a menu screen that fails in that language only; `null` for the game's own language. |
 | `path` | array | The decisions that led here, in order. Each has `kind` (`menu`, `screen`, `input`, `skip` for the outcome chosen for a skipped interaction, or `label` for the label a label run started at, which is then the first step), `file`, `line`, `choice` (the text chosen or typed) and `index`. |
 | `traceback` | string or null | The engine's traceback, when there is one. |
 | `count` | integer | How many times this problem was reached. |
@@ -147,5 +159,7 @@ The `translations` stage also has:
 | `bad-interpolation` | error | A translated line could not be shown in the state the game was in when the story reached it, usually because it names a variable the game does not have. `file` and `line` are in the translation; `path` is how the story got there. |
 | `untranslated` | warning | A line of dialogue (`message_id` `finding.untranslated_line`) or another text (`finding.untranslated_string`) has no translation into the language in `language`. `file` and `line` are the original's. |
 | `variable-mismatch` | warning | A translation does not show the same `[variables]` as its original. `params` has `missing` and `extra`, each a list separated by commas, or `-` for none. |
+| `screen-error` | error | A menu screen cannot be shown: putting it together raised an error. `params` has `screen`, the screen's name. `file` and `line` are where it failed, or the screen's own line when the engine does not say. With a `language`, the screen fails in that language and not in the game's own. |
 
 A `bad-text` finding with a `language` is about a translation, and its `file` and `line` are in the translation.
+A `bad-text` or `missing-file` finding whose `stage` is `screens` was found on a menu screen, and has no `path`: the screen is opened from the game's menus, not reached by a choice in the story.

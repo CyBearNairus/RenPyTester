@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Version 0.24 **approved** by the project owner on 2026-10-07. |
+| Status | Version 0.24 **approved** by the project owner on 2026-10-07. Version 0.25 amendments (from building M9) await approval. |
 | Last updated | 2026-10-07 |
 
 This document is the source of truth for what RenPyTester does.
@@ -90,6 +90,7 @@ Standard output is not relied on, because Windows game executables are GUI-subsy
 Script loading, lint, translation lookup and text substitution are all performed by the game's own engine, so results match what players would see on that engine version.
 
 **ARCH-004 (No source required).** Everything MUST work on a game whose scripts exist only as compiled `.rpyc` inside `.rpa` archives.
+Findings and coverage name the script's source file, such as `game/script.rpy`, for such a game too, on every supported engine.
 
 **ARCH-005 (Orchestrator has no runtime dependencies).** The orchestrator uses only the Python standard library at runtime, so "run from source" needs nothing but Python.
 Development and packaging tools (test runner, linter, PyInstaller) are dev-only dependencies.
@@ -102,6 +103,7 @@ A visible window exists only when the user explicitly asks for one.
 **ARCH-007 (No rendering).** The harness replaces the engine's interaction layer, so a run draws no frames and waits for nothing.
 A consequence is that problems which a player would only see when a frame is drawn do not surface by themselves.
 Every such class in 4.5 (missing files, undefined images, malformed text, screen errors) is therefore checked explicitly by the harness at the moment the statement executes.
+The menu screens, which no statement of the story shows, are checked by a stage of their own (4.8).
 
 **ARCH-008 (Exploration lives in the harness).** Decisions, snapshots and coverage are handled inside the game process, which explores many paths per launch.
 The orchestrator launches, supervises and divides work between processes; it does not steer individual choices.
@@ -173,10 +175,10 @@ The harness must get through a game with no human present.
 | RUN-012 | MUST | If the game process dies without the harness reporting why, report an `engine-crash` finding with the process exit code and the tail of the engine's log, then relaunch and continue with the branches that were waiting to be explored. The same applies after a hang (RUN-008). After 20 relaunches in one run, exploration stops and the report says how many branches were left. |
 | RUN-025 | MUST | The engine's *safe mode* is switched off during a run. On Windows the engine enters it whenever the Shift key is down as the game starts, which someone typing in another program can cause, and then shows a screen for choosing a renderer in place of the game. |
 | RUN-026 | MUST | The engine is started with a fixed hash seed, so that sets and dictionaries are ordered the same way on every run. Without it the engine's lint lists different unreachable statements from one run to the next. |
-| RUN-027 | MUST | Game processes start one at a time in a game folder: a process is started only when the one before it has loaded the game, and from then on they run at the same time. A game may write files of its own as it starts, script files among them, and a process that read the script while another was rewriting it would load a game with parts missing, so that what a run found would depend on timing (NFR-001). This goes for every process a run starts: the story's, those of label runs, the translation check and lint. The harness says that the game is loaded by making a file the orchestrator names; a process that ends, or is shut down, before saying so lets the next one start. The story's process is started first. Waiting for a turn ends at once when the run is stopped (CLI-006). What a game writes later, while it is played, is not covered by this, and is what the second note of SAFE-007 is about. |
+| RUN-027 | MUST | Game processes start one at a time in a game folder: a process is started only when the one before it has loaded the game, and from then on they run at the same time. A game may write files of its own as it starts, script files among them, and a process that read the script while another was rewriting it would load a game with parts missing, so that what a run found would depend on timing (NFR-001). This goes for every process a run starts: the story's, those of label runs, the translation check, the check of the menu screens and lint. The harness says that the game is loaded by making a file the orchestrator names; a process that ends, or is shut down, before saying so lets the next one start. The story's process is started first. Waiting for a turn ends at once when the run is stopped (CLI-006). What a game writes later, while it is played, is not covered by this, and is what the second note of SAFE-007 is about. |
 | RUN-023 | MUST | A project in development can reload itself when its script files change on disk. This is switched off during a run, because a reload restarts the game in the middle of a path. |
-| RUN-013 | SHOULD | Typical performance: at least 500 dialogue statements per second per game process on a mid-range desktop. |
-| RUN-014 | MUST | Explore several routes at the same time by running multiple game processes in parallel. `--jobs N` sets how many; the default is chosen from the number of CPU cores and available memory. `--jobs 1` is always supported. The story itself is explored by one process, because what exploration finds depends on the order it is done in (EXP-016, NFR-001); label runs, which do not depend on each other (EXP-019), are shared out between the other processes, and the engine's lint runs at the same time as both. The default is one process fewer than the computer has cores, at most 8, and no more than there is free memory for at 768 MB each. An extra process is not started for fewer than 8 labels. |
+| RUN-013 | SHOULD | Typical performance: at least 500 dialogue statements per second per game process on a mid-range desktop. It is measured on the game of NFR-005, as the lines of dialogue played divided by the time of the whole run, so that starting the engine and the other stages count against it. |
+| RUN-014 | MUST | Explore several routes at the same time by running multiple game processes in parallel. `--jobs N` sets how many; the default is chosen from the number of CPU cores and available memory. `--jobs 1` is always supported. The story itself is explored by one process, because what exploration finds depends on the order it is done in (EXP-016, NFR-001); label runs, which do not depend on each other (EXP-019), are shared out between the other processes, and the engine's lint, the translation check and the check of the menu screens (4.8) run at the same time as both. The default is one process fewer than the computer has cores, at most 8, and no more than there is free memory for at 768 MB each. An extra process is not started for fewer than 8 labels. |
 | RUN-015 | MUST | Parallel processes do not interfere with each other: each has its own save and persistent directory, its own event file and its own engine log. The engine's second copy of saves and persistent data, which it keeps in `game/saves`, is switched off for the run. |
 | RUN-016 | MUST | Nothing in a run waits on real time: no rendering to a display, no frame-rate limit, no audio playback, no animation or transition delays (extends RUN-004). |
 
@@ -270,8 +272,8 @@ Translation testing MUST NOT multiply run time by the number of languages: check
 
 | ID | Pri | Requirement |
 | --- | --- | --- |
-| UI-001 | SHOULD | Display each standard menu screen the game defines (main menu, preferences, save, load, history, about, help, confirm) and report any exception. |
-| UI-002 | SHOULD | Repeat UI-001 in each tested language. |
+| UI-001 | SHOULD | Display each standard menu screen the game defines (main menu, preferences, save, load, history, about, help, confirm) and report any exception. These are the screens named `main_menu`, `preferences`, `save`, `load`, `history`, `about`, `help` and `confirm`. Nothing is drawn (ARCH-007): each screen is built the way the engine builds one before drawing it, and asked what the engine asks of a screen as an interaction starts, in the state a new game starts in. This is the `screens` stage, done by a game process of its own that plays nothing; it is one of the default stages (CLI-001). A screen that cannot be built is a `screen-error` finding of severity *error*, placed at the line that failed, or at the screen's own line when the engine does not say which. On a screen that can be built, text tags and picture files are checked as they are while playing (ERR-013), and placed at the line of the text or picture. The `confirm` screen is given what the engine gives it; any other screen that asks for values is not built, and the report names it (COMPAT-005). A game that defines none of these screens finishes the stage with nothing to check. A game that fails as a new game starts has no screen to build: the stage is blocked, and a finding says why. The findings of this stage have no path, since no choice in the story leads to a menu screen. |
+| UI-002 | SHOULD | Repeat UI-001 in each tested language. The languages are those of TL-001, after the game's own, and the report lists them. A screen that fails in a language and not in the game's own is a `screen-error` finding for that language. A screen that fails in the game's own language is reported once, not once more for each language (the principle of TL-003). Text tags and picture files are checked in the game's own language only, since the tags of translated texts are checked by TL-003. A language that cannot be switched to (TL-002) has no screen built in it, and the report says so; why it cannot be switched to is said by the translations stage. The process that builds the screens switches language, so it plays nothing (TL-002). |
 | UI-003 | COULD | Display every screen that has no required parameters. |
 
 ### 4.9 Reporting (REP)
@@ -293,7 +295,7 @@ Translation testing MUST NOT multiply run time by the number of languages: check
 
 | ID | Pri | Requirement |
 | --- | --- | --- |
-| CLI-001 | MUST | `renpytester GAME` runs all default stages (`lint`, `routes`, `translations`) with default settings. The `routes` stage includes label runs (EXP-007). |
+| CLI-001 | MUST | `renpytester GAME` runs all default stages (`lint`, `routes`, `translations`, `screens`) with default settings. The `routes` stage includes label runs (EXP-007). |
 | CLI-002 | MUST | `--stages a,b` selects stages. |
 | CLI-003 | MUST | Exit codes: `0` no findings at or above the failure threshold; `1` findings at or above it; `2` bad usage or configuration; `3` the game could not be launched or the tool failed internally. |
 | CLI-004 | MUST | `--fail-on error\|warning\|info\|never` sets the threshold (default `error`). |
@@ -348,7 +350,7 @@ It is a front end to the same run the command line performs, not a second implem
 | ID | Pri | Requirement |
 | --- | --- | --- |
 | GUI-001 | MUST | Choose the game by browsing for a folder or dropping one on the executable. Once chosen, show what was detected (GAME-006): name, engine version, languages. The game's path can also be typed or pasted. Finding out what the game is runs in the background, as `renpytester info` does it (CLI-008); when the game cannot be started, the window says why. |
-| GUI-002 | MUST | Options shown as plain controls with sensible defaults: stages to run, languages to test, sandbox copy on/off (SAFE-006), and an optional SDK folder when the game needs one. Everything else stays at its default or comes from `renpytester.toml`. The SDK control is shown only for a game that has no engine of its own, and starts with the folder the `RENPY_SDK` environment variable names, if any. There is one box for each language the game has, all ticked at first. *Run* is not available while nothing is ticked to check, or translations are ticked with no language. All of these but the SDK folder are among the advanced settings (GUI-016). |
+| GUI-002 | MUST | Options shown as plain controls with sensible defaults: stages to run, languages to test, sandbox copy on/off (SAFE-006), and an optional SDK folder when the game needs one. The languages are those the translations and the menu screens are checked in (TL-001, UI-002). Everything else stays at its default or comes from `renpytester.toml`. The SDK control is shown only for a game that has no engine of its own, and starts with the folder the `RENPY_SDK` environment variable names, if any. There is one box for each language the game has, all ticked at first. *Run* is not available while nothing is ticked to check, or translations are ticked with no language. All of these but the SDK folder are among the advanced settings (GUI-016). |
 | GUI-003 | MUST | A *Run* button that becomes *Cancel* during a run. Cancelling behaves as Ctrl+C does (CLI-006). Closing the window during a run cancels the run first, and the window closes when the game folder has been restored. |
 | GUI-004 | MUST | During a run: one progress bar, the current stage, and running counts of errors and warnings. No game window appears (ARCH-006). The interface stays responsive. The bar shows how much of the script has been played; until the game reports in, it shows only that work is going on. The controls cannot be changed during a run. Notes and possible issues are counted too. |
 | GUI-005 | MUST | After a run: a pass/fail result, counts by severity, and a button that opens the HTML report in the default browser. A second button opens the folder the reports are in. |
@@ -388,7 +390,7 @@ It is a front end to the same run the command line performs, not a second implem
 | NFR-002 | MUST | **No false passes.** If a stage could not run or did not finish, the run does not exit 0 claiming success; the report states what was not checked. |
 | NFR-003 | MUST | **Low false positives.** On the reference games (7.1), which are known to work, a default run reports zero findings of severity *error*. |
 | NFR-004 | MUST | **Robustness.** A bug in the harness is reported as a tool error (exit 3, "this is a RenPyTester bug"), never as a problem in the user's game. |
-| NFR-005 | SHOULD | **Speed.** A default run on a 50,000-word game completes in under 5 minutes on a 4-core desktop. |
+| NFR-005 | SHOULD | **Speed.** A default run on a 50,000-word game completes in under 5 minutes on a 4-core desktop. A test makes such a game (chapters of dialogue, each with a menu of three answers), runs it with one game process, which is the slowest a run can be, and fails when it takes longer. On a build server, which is not a desktop, the same test checks only that the whole game was played. The measurements are in [SPIKES.md](SPIKES.md). |
 | NFR-007 | MUST | **Unobtrusive.** During a default run the user can keep working on the same machine: nothing appears on screen except the tool's own progress display, no sound plays, and focus is never taken (ARCH-006). |
 | NFR-008 | MUST | **Documentation lint.** Every Markdown file in the repository passes `markdownlint` using the configuration in `.markdownlint.json`. This is checked in CI and a failure blocks the merge. Rules are changed in that file, never silenced inline without a comment giving the reason. |
 | NFR-009 | MUST | **Code lint.** Every script in the repository passes its linter with no problems reported: Python files pass `flake8` with the configuration in `.flake8` (line length 120); Ren'Py script files pass `tools/lint_rpy.py`, which enforces Ren'Py layout rules (spaces only, indentation in multiples of four, line length 120) and runs `flake8` on the Python inside them. This covers product code, tests, tools and spikes alike, is checked in CI, and a failure blocks the merge. |
@@ -439,6 +441,7 @@ Fixtures are original content written for this repository.
 
 Every test names the requirement IDs it verifies.
 A requirement is *done* when it has at least one passing test that names it.
+A test of the project itself fails when a MUST requirement, or an architecture constraint of section 3, is named by no test, and when a test names a requirement that does not exist.
 
 Version matrix: orchestrator unit tests run on every supported Python from 3.11 to the current release (locally with the `py` launcher and one virtual environment per version; in CI as a matrix).
 End-to-end tests run against the oldest supported and the newest Ren'Py 8.x SDK.
@@ -447,13 +450,25 @@ The harness's Python version cannot be chosen with a virtual environment, becaus
 ### 7.4 Acceptance for 1.0
 
 1. All MUST requirements done per 7.3.
-2. `renpytester <The Question>` with no other arguments: exit 0, 100% statement coverage, zero errors.
+2. `renpytester <The Question>` with no other arguments: exit 0, 100% statement coverage, zero errors, and every stage done.
 3. `renpytester <Tutorial>`: completes within limits, zero errors, per-language translation summary present.
 4. Every fixture game yields exactly its expected finding.
 5. A fixture game that writes to its own directory, run with `--sandbox`: the original is byte-for-byte unchanged, and a second run copies only the files changed in between.
 6. Items 2 and 4 also pass using the Windows single-file executable.
 7. The same run started from the graphical interface gives the same findings as the command line, in both English and Brazilian Portuguese.
 8. During items 2 to 4 no game window is shown and no audio is played.
+
+Each item is checked by tests, on the oldest and the newest supported engine:
+
+| Item | Checked by |
+| --- | --- |
+| 1 | `test_every_requirement_that_must_be_met_is_named_by_a_test`, with the whole suite passing. |
+| 2, 3 | `test_reference_games_report_no_errors`. |
+| 4 | `tests/e2e/test_fixtures.py` and `tests/e2e/test_screens.py`: every fixture game has a test of what it yields. |
+| 5 | `test_sandbox_tests_a_copy_and_never_writes_to_the_game` and `test_second_sandbox_run_copies_only_what_changed_in_between`. |
+| 6 | The end-to-end tests run against the executable (DIST-006), which the release process does for each system. |
+| 7 | `test_run_from_the_window_finds_what_the_command_line_finds`, in both languages. |
+| 8 | `test_no_window_appears_on_screen_while_a_game_is_tested`, which watches the screen on Windows while The Question is tested; and `test_engine_is_started_with_no_window_and_no_sound`, for the sound device the engine is not given. On Linux and macOS it rests on the same settings and is still unverified (9.1). |
 
 ---
 
@@ -474,7 +489,7 @@ The harness's Python version cannot be chosen with a virtual environment, becaus
 | M6 | Sandbox (**done** 2026-10-06) | Cached copy with incremental synchronisation, cache commands, and the report of files a game writes by itself. The GUI's part of SAFE-012 comes with M7. | SAFE-006, -007, -009–012 |
 | M7 | Graphical interface (**done** 2026-10-06) | The window described in 4.14. | GUI-001–017, CLI-007, COMPAT-007 |
 | M8 | Packaging (**done** 2026-10-06) | Single-file executables, release CI. The release process itself has not run yet: it runs when the first tag is pushed. | DIST-001–006, CLI-007 (the executable's part) |
-| M9 | Hardening | Screen smoke test, performance, acceptance. | UI, NFR, 7.4 |
+| M9 | Hardening (**done** 2026-10-07) | The `screens` stage, which builds the menu screens in every language. Speed measured on a generated game of 50,000 words, with a test that holds it to the target. Acceptance: every MUST requirement is named by a test, which a test checks, and each item of 7.4 has its test. Showing every screen with no parameters (UI-003, COULD) is left for later. | UI-001, -002, RUN-013, NFR-005, 7.4; and the tests that ARCH-001 to -004, -008, RUN-006, -018, -023, -024 and NFR-007 lacked |
 
 ---
 
@@ -500,7 +515,9 @@ Still unverified, and the requirements that depend on them:
 
 Open:
 
-None.
+| # | Question | Recommendation |
+| --- | --- | --- |
+| D28 | Approve the version 0.25 amendments, from building M9: UI-001 and UI-002 made precise, and `screens` made a default stage (CLI-001). In particular: a game that has run clean so far may now fail on a menu screen that was never checked before; `--stages lint,routes,translations` gives the earlier behaviour. Also approve how speed is measured (RUN-013, NFR-005) and the table that ties each item of the acceptance to its tests (7.4). | Approve. |
 
 Settled on 2026-10-06:
 
@@ -564,3 +581,4 @@ Settled on 2026-10-06:
 | 2026-10-06 | 0.22 | M8 built. D21 settled (0.17 to 0.21 approved). CLI-007 and DIST-002 to DIST-006 made precise: how the executable is built, named, tested and released, and how it tells a double click from a terminal. Two assumptions added to 9.1. |
 | 2026-10-07 | 0.23 | Owner's request (D27): added RUN-027 (game processes start one at a time). DIST-005 allows a rehearsal started by hand. Section 9.1 brought up to date with the first release run. |
 | 2026-10-07 | 0.24 | D26 settled (0.22 approved). Nothing is waiting for approval. |
+| 2026-10-07 | 0.25 | M9 built. UI-001 and UI-002 made precise: the `screens` stage builds each standard menu screen without drawing it, in every language checked, and is a default stage (CLI-001). RUN-013 and NFR-005 say how speed is measured. Section 7.3 has a test of traceability, and 7.4 names the tests of each item of the acceptance. RUN-014, RUN-027, ARCH-007 and GUI-002 mention the new stage. ARCH-004 says how files are named for a game with no source, which a new test found wrong on Ren'Py 8.0. D28 opened. |

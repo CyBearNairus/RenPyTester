@@ -273,7 +273,7 @@ def test_help_documents_every_option_with_its_default(capsys):
             "--lang", "--version"):
         assert option in text, option
     for default in (
-            "(default: renpytester-report)", "(default: lint,routes,translations)", "(default: explore)",
+            "(default: renpytester-report)", "(default: lint,routes,translations,screens)", "(default: explore)",
             "(default: 5000)", "(default: 600)", "(default: 500)", "(default: 0)", "(default: 60)",
             "(default: Tester)", "(default: 200000)", "(default: error)"):
         # The help is wrapped to the width of the terminal, sometimes in the middle of a hyphenated word.

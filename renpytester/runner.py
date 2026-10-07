@@ -22,13 +22,14 @@ from renpytester.workspace import PREFIX, Workspace
 LINT = "lint"
 ROUTES = "routes"
 TRANSLATIONS = "translations"
-STAGES = (LINT, ROUTES, TRANSLATIONS)
+SCREENS = "screens"
+STAGES = (LINT, ROUTES, TRANSLATIONS, SCREENS)
 # How many times a run starts the game again after it died or hung, before giving up on what is left.
 MAX_RELAUNCHES = 20
 # Fewer labels than this are not worth starting another game process for.
 LABELS_PER_PROCESS = 8
 # Stages the specification defines that are not built yet. They are reported as not run, never as passed.
-NOT_BUILT = ("screens",)
+NOT_BUILT = ()
 
 PARSE_ERROR = re.compile(r'^File "(?P<file>[^"]+)", line (?P<line>\d+): (?P<message>.*)$')
 TRACEBACK_FILE = re.compile(r'File "(?P<file>game/[^"]+)", line (?P<line>\d+)')
@@ -323,6 +324,7 @@ def run_in(options, basedir, original, known, on_progress, stop=None):
                     harness_settings["languages"] = languages
                 jobs = []
                 translated = []
+                screens = []
                 if LINT in options.stages:
                     progress("stage", name=LINT)
                     jobs.append((run_lint, (game, options, work_dir, output_dir, report, progress, cancel)))
@@ -334,6 +336,10 @@ def run_in(options, basedir, original, known, on_progress, stop=None):
                 if translating:
                     progress("stage", name=TRANSLATIONS)
                     jobs.append((lambda *arguments: translated.append(check_translations(*arguments)), (
+                        game, options, harness_settings, languages, work_dir, output_dir, report, cancel)))
+                if SCREENS in options.stages:
+                    progress("stage", name=SCREENS)
+                    jobs.append((lambda *arguments: screens.append(check_screens(*arguments)), (
                         game, options, harness_settings, languages, work_dir, output_dir, report, cancel)))
                 # Lint and the translation check read the script while the game is being played, unless
                 # only one process may run.
@@ -354,6 +360,8 @@ def run_in(options, basedir, original, known, on_progress, stop=None):
                 # process finished first (NFR-001).
                 if translated:
                     finish_translations(translated[0], report)
+                if screens:
+                    finish_screens(screens[0], report)
     except KeyboardInterrupt:
         # Stopped by the user. The game processes are gone and the game folder is as it was; what
         # was found up to now is still reported, marked as not complete (CLI-006).
@@ -504,6 +512,66 @@ def finish_translations(events, report):
     stage["played"] = report.stages[ROUTES]["status"] == "done"
     if not stage["played"]:
         report.notes.append({"message_id": "note.translations_not_played", "params": {}})
+
+
+def check_screens(game, options, harness_settings, languages, work_dir, output_dir, report, cancel):
+    """Builds the game's menu screens in every language checked, in a game process that plays
+    nothing (spec 4.8). Returns the events that process wrote, or None when it did not finish."""
+    stage = report.stages[SCREENS]
+    stage["status"] = "running"
+    # A folder of its own: this runs while the game is being played (RUN-015).
+    result = run_engine(
+        game, "run", Path(work_dir) / SCREENS, Path(output_dir) / "engine-logs" / SCREENS,
+        dict(harness_settings, screens=True, languages=list(languages)), max(options.timeout, 300),
+        show_window=options.show_window, cancel=cancel)
+    if result.cancelled:
+        return None
+
+    bug = next((e for e in result.events if e["ev"] == "harness_error"), None)
+    if bug:
+        raise ToolError("error.harness_bug", message=bug.get("message"), traceback=bug.get("traceback"))
+    if not any(e["ev"] == "screens" for e in result.events):
+        if TRACEBACK_FILE.search(result.output):
+            # The game fails as it starts, before any screen can be built. The finding says why,
+            # as it does when playing the game meets the same failure.
+            report.add(load_failure(result.output, SCREENS))
+            stage["status"] = "blocked"
+            return None
+        if PREFIX in result.output:
+            raise ToolError("error.harness_bug", message="", traceback=result.output[-4000:])
+        stage["status"] = "failed"
+        stage["reason"] = "timeout" if result.timed_out else "exit code %s" % result.exit_code
+        report.notes.append({"message_id": "note.screens_failed", "params": {"reason": stage["reason"]}})
+        return None
+    return result.events
+
+
+def finish_screens(events, report):
+    """Puts what building the menu screens found into the report (spec 4.8)."""
+    stage = report.stages[SCREENS]
+    if events is None:
+        return
+
+    for event in events:
+        if event["ev"] == "finding":
+            report.add(to_finding(event, SCREENS))
+        elif event["ev"] == "screens":
+            # A game whose variables cannot be given their starting values has no screen to show:
+            # the finding says why, as it does for a script that does not load.
+            stage["status"] = "blocked" if event.get("blocked") else "done"
+            stage["screens"] = list(event.get("screens") or [])
+            stage["skipped"] = list(event.get("skipped") or [])
+            stage["languages"] = list(event.get("languages") or [])
+            stage["not_switched"] = list(event.get("not_switched") or [])
+    stage["findings"] = sum(1 for finding in report.findings if finding.stage == SCREENS)
+
+    # What was not checked is said, never passed over (COMPAT-005).
+    if stage["skipped"]:
+        report.notes.append({
+            "message_id": "note.screens_skipped", "params": {"screens": ", ".join(stage["skipped"])}})
+    if stage["not_switched"]:
+        report.notes.append({
+            "message_id": "note.screens_languages", "params": {"languages": ", ".join(stage["not_switched"])}})
 
 
 def split_labels(labels, jobs):

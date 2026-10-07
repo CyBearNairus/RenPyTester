@@ -104,7 +104,7 @@ def test_dialogue_quoted_by_lint_does_not_decide_the_kind_of_problem():
     assert lint.classify(message) == ("bad-text", ERROR)
 
 
-@pytest.mark.req("LINT-001")
+@pytest.mark.req("LINT-001", "LINT-005")
 def test_unknown_kind_of_problem_is_a_warning_not_an_error():
     findings, _statistics = lint.parse(NEW_ENGINE)
     finding = by_line(findings)[("game/screens.rpy", 40)]
@@ -117,7 +117,7 @@ def test_complaints_about_our_own_file_are_dropped():
     assert not [f for f in findings if "zzz_renpytester" in f.file]
 
 
-@pytest.mark.req("LINT-001", "TL-007", "ERR-007")
+@pytest.mark.req("LINT-001", "LINT-005", "TL-007", "ERR-007")
 def test_sections_become_informational_findings():
     findings, _statistics = lint.parse(NEW_ENGINE)
     unreachable = [f for f in findings if f.cls == "unreachable"]
@@ -149,8 +149,10 @@ def test_report_from_the_oldest_engine_is_read():
     assert statistics["menus"] == 0
 
 
-@pytest.mark.req("COMPAT-005")
+@pytest.mark.req("COMPAT-005", "LINT-004")
 def test_options_an_engine_rejects_are_recognised():
+    # Lint is asked for all it can report; an engine that lacks an option says so, and is run without it.
+    assert lint.EXTRA_OPTIONS == ("--all-problems", "--check-unclosed-tags")
     output = "usage: renpy.py ...\nrenpy.py: error: unrecognized arguments: --all-problems --check-unclosed-tags\n"
     assert lint.unrecognised_options(output) == ["--all-problems", "--check-unclosed-tags"]
     assert lint.unrecognised_options("all fine") == []

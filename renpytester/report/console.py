@@ -180,6 +180,14 @@ class Console:
                     "console.translation", language=name, lines=dialogue["translated"], lines_total=dialogue["total"],
                     strings=strings["translated"], strings_total=strings["total"]))
 
+        screens = report.stages.get("screens", {})
+        if screens.get("screens"):
+            self.write(t(
+                "console.screens", count=len(screens["screens"]), names=", ".join(screens["screens"]),
+                languages=len(screens.get("languages") or [])))
+        elif screens.get("status") == "done":
+            self.write(t("console.screens.none"))
+
         not_run = [name for name, stage in report.stages.items() if stage["status"] == "not_implemented"]
         if not_run:
             self.write(self.paint(t("console.not_checked", stages=", ".join(not_run)), "dim"))

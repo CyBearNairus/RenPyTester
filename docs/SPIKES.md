@@ -97,3 +97,35 @@ The Tutorial number is from a naive explorer that writes an event per decision a
     `renpy.translation.scanstrings.scan` returns the menu choices and the text marked for translation, each with its file and line, and says which come from the engine's own files.
     It reads script source, so a game shipped as compiled files only gives its menu choices, through the translator's `additional_strings`.
     For a menu choice, 8.0 gives the line of the menu and 8.6 the line of the choice.
+20. **A screen can be built without being drawn, from the start callback.**
+    Found while building M9.
+    `renpy.show_screen`, then `update()` on what `renpy.get_screen` gives back, runs the screen's code and makes everything on it; `per_interact` on each part is what the engine asks next, and is where buttons work out whether they can be pressed.
+    `config.start_callbacks` run before or after the game's `default` statements depending on the engine version; `renpy.execute_default_statement(False)` gives a value only to variables that have none yet, so it is safe in both.
+    With `True` it raises on 8.6, where the values were already given.
+21. **There is no renderer in a run, and the standard preferences screen asks it questions.**
+    `renpy.display.draw` is `None` because nothing is drawn.
+    The *Display* buttons of the default preferences screen call `renpy.get_renderer_info()` and `renpy.get_physical_size()`, which both go through it.
+22. **An exception in screen code is placed by its traceback only when the code is a Python expression.**
+    `action SetVariable("v", missing + 1)` has a frame in `game/screens.rpy` with the line; text such as `"[missing]"` is filled in by the engine's own code and has none.
+    Each screen records where it is defined (`Screen.location`), and each part of it where it was written (`_location`), on both engine versions.
+23. **The oldest engine names a script after its compiled file when it has no source.**
+    Found by the first test of a game whose only script is a `.rpyc` inside an archive.
+    On 8.0 every statement of such a script has the file name `script.rpyc`, with no `game/` before it; on 8.6 it keeps `game/script.rpy`.
+    Findings were placed at `script.rpyc`, and nothing that looks for `game/` at the start of a name recognised the file.
+    The harness now gives every file name through one function, `script_file`, which puts both right.
+
+## Speed, measured in M9
+
+A game of 50,160 words was generated for the purpose: 44 chapters, each with 65 lines of dialogue and a menu of three answers.
+Run on 2026-10-07 on a 24-core Windows 11 desktop, all default stages, from source.
+
+| Engine | `--jobs` | Whole run | Paths | Statements executed |
+| --- | --- | --- | --- | --- |
+| 8.6.0 | 1 | 74 s | 221 | 145,707 |
+| 8.6.0 | 4 | 71 s | 221 | 146,094 |
+| 8.0.3 | 1 | 71 s | 221 | 415,066 |
+
+The older engine counts more statements for the same game because each line of dialogue is two nodes there (result 16).
+More processes barely help this game: the story is explored by one process, and here the story is nearly all of the work.
+A profile of that process shows the time going to the engine's own handling of a line of dialogue (its rollback log, the say screen, the scene it puts together for a transition), not to the harness, whose hooks take under a tenth of it.
+Making it faster would mean replacing more of the engine, and the spec's targets (NFR-005, RUN-013) are met four times over, so nothing was changed.

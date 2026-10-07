@@ -10,31 +10,9 @@ from tests.conftest import folder_digest
 pytestmark = pytest.mark.e2e
 
 
-@pytest.fixture
-def run(sdk, game_copy, tmp_path, capsys):
-    """Runs the command line on a copy of a fixture game. Returns (exit code, report, console text, game path)."""
-
-    def run(name, *extra):
-        game = game_copy(name)
-        before = folder_digest(game)
-        files_before = sorted(p.relative_to(game).as_posix() for p in game.rglob("*"))
-        output = tmp_path / "report"
-        # One game process unless the test says otherwise, so that results do not depend on the machine.
-        jobs = [] if "--jobs" in extra else ["--jobs", "1"]
-        code = cli.main([str(game), "--sdk", str(sdk), "--output", str(output), "--lang", "en", *jobs, *extra])
-        text = capsys.readouterr().out
-        assert folder_digest(game) == before, "the game folder was changed by the run"
-        assert sorted(p.relative_to(game).as_posix() for p in game.rglob("*")) == files_before
-        files = sorted(output.glob("report-*.json"), key=lambda p: p.stat().st_mtime_ns)
-        report = json.loads(files[-1].read_text(encoding="utf-8")) if files else None
-        return code, report, text, game
-
-    return run
-
-
 @pytest.mark.req(
     "CLI-001", "CLI-003", "GAME-004", "GAME-006", "GAME-007", "RUN-001", "RUN-002", "RUN-004", "RUN-007", "SAFE-001",
-    "SAFE-002", "SAFE-004", "SAFE-013", "NFR-003")
+    "SAFE-002", "SAFE-004", "SAFE-013", "NFR-003", "ARCH-008")
 def test_clean_game_passes(run):
     code, report, text, _game = run("clean")
     assert code == 0
@@ -88,7 +66,7 @@ def test_jump_to_a_missing_label_is_reported(run):
     assert "no_such_label" in finding["params"]["message"]
 
 
-@pytest.mark.req("ERR-001", "REP-008")
+@pytest.mark.req("ERR-001", "REP-008", "ARCH-003")
 def test_script_that_does_not_parse_is_reported(run, tmp_path):
     code, report, _text, _game = run("parse_error")
     assert code == 1
@@ -170,30 +148,49 @@ def test_report_folder_inside_the_game_is_refused(sdk, game_copy, capsys):
     assert not (game / "report").exists()
 
 
-@pytest.mark.req("NFR-003", "COMPAT-002", "ARCH-004")
+@pytest.mark.req("NFR-003", "COMPAT-002", "CLI-001", "UI-001", "UI-002", "TL-012", "EXP-003")
 @pytest.mark.parametrize("name", ["the_question", "tutorial"])
 def test_reference_games_report_no_errors(sdk, tmp_path, capsys, name):
+    """Items 2 and 3 of the acceptance for 1.0 (spec 7.4): a run with nothing asked for but the game."""
     import shutil
 
     game = tmp_path / name
     shutil.copytree(sdk / name, game)
     before = folder_digest(game)
     code = cli.main([str(game), "--sdk", str(sdk), "--output", str(tmp_path / "report"), "--lang", "en"])
-    capsys.readouterr()
+    text = capsys.readouterr().out
     report = json.loads(next((tmp_path / "report").glob("report-*.json")).read_text(encoding="utf-8"))
     assert code == 0
+    assert report["complete"] is True
     assert report["summary"]["error"] == 0
-    assert report["game"]["languages"]
+    assert report["settings"]["stages"] == ["lint", "routes", "translations", "screens"]
+    assert {stage["status"] for stage in report["stages"].values()} == {"done"}
     assert report["stages"]["routes"]["paths"] > 1
+    # Within its limits: nothing was left unexplored because one was reached.
+    assert "limited" not in report["stages"]["routes"]
     coverage = report["coverage"]
     if name == "the_question":
-        assert coverage["total"] - coverage["executed"] <= 1
+        assert coverage["executed"] == coverage["total"]
     else:
         assert coverage["executed"] / coverage["total"] > 0.9
+
+    # A summary for each language, in the report and on the console.
+    languages = report["stages"]["translations"]["languages"]
+    assert list(languages) == report["game"]["languages"] and languages
+    for language, counts in languages.items():
+        assert counts["switched"] is True, language
+        assert "%s: %d of %d lines of dialogue" % (
+            language, counts["dialogue"]["translated"], counts["dialogue"]["total"]) in text
+
+    # Every standard menu screen, in the game's own language and in each of the others.
+    screens = report["stages"]["screens"]
+    assert screens["screens"] == ["main_menu", "preferences", "save", "load", "history", "about", "help", "confirm"]
+    assert screens["languages"] == [None] + report["game"]["languages"]
+    assert (screens["skipped"], screens["not_switched"], screens["findings"]) == ([], [], 0)
     assert folder_digest(game) == before
 
 
-@pytest.mark.req("LINT-001", "ERR-003", "ERR-004", "ERR-005", "CLI-002")
+@pytest.mark.req("LINT-001", "ERR-003", "ERR-004", "ERR-005", "CLI-002", "ARCH-003")
 def test_lint_finds_problems_the_story_never_reaches(run):
     code, report, text, _game = run("lint_problems", "--no-labels")
     assert code == 1
@@ -276,7 +273,7 @@ def choices(finding):
     return [step["choice"] for step in finding["path"]]
 
 
-@pytest.mark.req("EXP-001", "EXP-002", "EXP-004", "EXP-005")
+@pytest.mark.req("EXP-001", "EXP-002", "EXP-004", "EXP-005", "EXP-016")
 def test_crash_behind_two_choices_is_found_with_its_path(run):
     code, report, text, _game = run("branches")
     assert code == 1
@@ -312,7 +309,7 @@ def test_branches_do_not_see_each_others_state(run):
     assert report["stages"]["routes"]["paths"] == 2
 
 
-@pytest.mark.req("EXP-001", "EXP-006")
+@pytest.mark.req("EXP-001", "EXP-006", "EXP-017")
 def test_hub_menu_is_covered_without_looping(run):
     code, report, _text, _game = run("hub")
     assert code == 0
@@ -383,7 +380,7 @@ def by_line(report):
     return sorted((f["line"], f["class"]) for f in report["findings"])
 
 
-@pytest.mark.req("ERR-004", "ARCH-007")
+@pytest.mark.req("ERR-004", "ARCH-007", "ERR-013")
 def test_undefined_image_is_found_by_playing(run):
     code, report, text, _game = run("undefined_image", "--stages", "routes")
     assert code == 1
@@ -395,7 +392,7 @@ def test_undefined_image_is_found_by_playing(run):
     assert "stranger smiling" in text
 
 
-@pytest.mark.req("ERR-003", "ARCH-007")
+@pytest.mark.req("ERR-003", "ARCH-007", "ERR-013")
 def test_missing_image_file_is_found_by_playing(run):
     code, report, _text, _game = run("missing_image_file", "--stages", "routes")
     assert code == 1
@@ -404,7 +401,7 @@ def test_missing_image_file_is_found_by_playing(run):
     assert report["coverage"]["executed"] == report["coverage"]["total"]
 
 
-@pytest.mark.req("ERR-003", "ARCH-007")
+@pytest.mark.req("ERR-003", "ARCH-007", "ERR-013")
 def test_missing_audio_files_are_found_by_playing(run):
     code, report, _text, _game = run("missing_audio", "--stages", "routes")
     assert code == 1
@@ -415,7 +412,7 @@ def test_missing_audio_files_are_found_by_playing(run):
     assert report["stages"]["routes"]["end_reasons"] == {"end": 1}
 
 
-@pytest.mark.req("ERR-005", "ARCH-007")
+@pytest.mark.req("ERR-005", "ARCH-007", "ERR-013")
 def test_bad_text_tags_are_found_by_playing(run):
     code, report, _text, _game = run("bad_text", "--stages", "routes")
     assert code == 1
@@ -589,7 +586,7 @@ def test_several_game_processes_give_the_same_report_as_one(sdk, tmp_path, capsy
         logs = next(output.glob("report-*-logs"))
         # Each process keeps its own event file and its own engine log.
         folders = sorted(p.name for p in logs.iterdir() if p.is_dir())
-        assert folders == ["labels-%d" % i for i in range(1, jobs)] + ["translations"]
+        assert folders == ["labels-%d" % i for i in range(1, jobs)] + ["screens", "translations"]
         for name in folders[:-1]:
             assert (logs / name / "events-run.jsonl").stat().st_size > 0
         assert (logs / "translations" / "events-renpytester_translations.jsonl").stat().st_size > 0
@@ -641,16 +638,60 @@ def test_jobs_must_be_at_least_one(sdk, game_copy, tmp_path, capsys):
     assert "--jobs" in capsys.readouterr().out
 
 
-@pytest.mark.req("RUN-004", "RUN-016")
+@pytest.mark.req("RUN-004", "RUN-016", "RUN-018")
 def test_nothing_waits_on_real_time(run):
     import datetime
 
     code, report, _text, _game = run("waits", "--stages", "routes")
     assert code == 0
+    # Not even the interaction the script builds by hand, with nothing to press, holds the story up.
+    assert report["findings"] == []
     assert report["coverage"]["executed"] == report["coverage"]["total"]
     started, finished = (datetime.datetime.fromisoformat(report[name]) for name in ("started", "finished"))
     # The script asks for two minutes of waiting.
     assert (finished - started).total_seconds() < 30
+
+
+@pytest.mark.req("RUN-006", "EXP-004", "EXP-016")
+def test_buttons_of_a_called_screen_are_explored_like_the_choices_of_a_menu(run):
+    code, report, _text, _game = run("screen_choice")
+    assert code == 1
+    assert len(report["findings"]) == 1
+    finding = report["findings"][0]
+    assert (finding["class"], finding["file"], finding["line"]) == ("exception", "game/script.rpy", 19)
+    assert [(step["kind"], step["choice"], step["index"]) for step in finding["path"]] == [("screen", "Right door", 1)]
+    assert report["stages"]["routes"]["end_reasons"] == {"end": 1, "exception": 1}
+    assert report["coverage"]["executed"] == report["coverage"]["total"]
+
+
+@pytest.mark.req("RUN-024", "RUN-019", "RUN-021")
+def test_outcomes_of_a_skipped_interaction_are_read_from_the_script_that_follows(run, tmp_path):
+    code, report, _text, _game = run("minigame_inference", "--stages", "routes", "--no-labels")
+    assert code == 0
+    assert [(f["class"], f["severity"], f["line"]) for f in report["findings"]] == [("stuck", "info", 14)]
+
+    logs = sorted((tmp_path / "report").glob("report-*-logs"))[-1]
+    events = [json.loads(line) for line in (logs / "events-run.jsonl").read_text(encoding="utf-8").splitlines()]
+    skipped = next(event for event in events if event["ev"] == "decision" and event["kind"] == "skip")
+    # The result is followed into the variable it is copied to and across the jump: each value it is
+    # compared with, one that matches none, and the values on either side of the number that a
+    # variable the story never set is compared with.
+    assert skipped["options"] == [
+        "result = 'gold', arrows_left = 2", "result = 'silver', arrows_left = 2",
+        "result = 'bronze', arrows_left = 2", "result = None, arrows_left = 2",
+        "result = 'gold', arrows_left = 3", "result = 'gold', arrows_left = 1"]
+    assert report["stages"]["routes"]["paths"] == 6
+    coverage = report["coverage"]
+    assert coverage["executed"] + coverage["low_confidence"] == coverage["total"]
+
+
+@pytest.mark.req("RUN-023")
+def test_project_that_reloads_itself_when_its_files_change_does_not_during_a_run(run):
+    # The fixture's story raises an exception if the game would still reload itself.
+    code, report, _text, _game = run("reloads")
+    assert code == 0
+    assert report["findings"] == []
+    assert report["stages"]["routes"]["end_reasons"] == {"end": 1}
 
 
 @pytest.mark.req("RUN-025", "EXP-018")
@@ -721,7 +762,7 @@ def test_broken_text_tags_in_a_translation_are_reported_where_the_translation_is
         assert all(other["stage"] == "lint" for other in finding["also"])
 
 
-@pytest.mark.req("TL-004", "TL-006")
+@pytest.mark.req("TL-004", "TL-006", "ARCH-003")
 def test_translation_that_fails_in_the_real_game_state_is_found_by_playing(run):
     code, report, text, _game = run("tl_bad_variable")
     assert code == 1
@@ -991,7 +1032,7 @@ def test_baseline_leaves_only_new_findings(run, tmp_path):
     assert (len(report["findings"]), report["summary"]["known"]) == (1, 0)
 
 
-@pytest.mark.req("REP-002", "REP-003", "REP-004", "REP-005", "REP-009")
+@pytest.mark.req("REP-002", "REP-003", "REP-004", "REP-005", "REP-009", "REP-010")
 def test_every_run_writes_json_junit_and_html_reports(run, tmp_path):
     import xml.etree.ElementTree as ElementTree
 

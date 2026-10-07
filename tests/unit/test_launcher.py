@@ -17,7 +17,7 @@ def env(tmp_path):
     return build_environment(tmp_path / "events.jsonl", {"seed": 1}, tmp_path / "logs")
 
 
-@pytest.mark.req("GAME-007", "ARCH-006")
+@pytest.mark.req("GAME-007", "ARCH-006", "NFR-007")
 def test_engine_is_started_with_no_window_and_no_sound(env, tmp_path):
     assert env["SDL_VIDEODRIVER"] == "dummy"
     assert env["SDL_AUDIODRIVER"] == "dummy"
@@ -56,7 +56,7 @@ def test_engine_is_given_an_editor_that_opens_nothing(env, monkeypatch):
     editor.open_project("somewhere")
 
 
-@pytest.mark.req("NFR-001")
+@pytest.mark.req("NFR-001", "RUN-026")
 def test_engine_orders_sets_the_same_way_on_every_run(env):
     assert env["PYTHONHASHSEED"] == "0"
 
@@ -132,6 +132,18 @@ def test_game_processes_start_one_at_a_time_and_then_run_together(stand_in, tmp_
 def test_process_that_dies_before_loading_the_game_lets_the_next_one_start(stand_in, tmp_path):
     code, _output = run_command(stand_in, "lint", ["--never-loads"], tmp_path, tmp_path, 30)
     assert code == 0
+    started = time.monotonic()
+    assert Startup(stand_in, tmp_path, "run").enter() is True
+    assert time.monotonic() - started < 1
+
+
+@pytest.mark.req("RUN-027")
+def test_process_that_cannot_be_started_does_not_keep_the_next_one_waiting(stand_in, tmp_path):
+    (tmp_path / "logs").write_text("a file where the folder for logs should be", encoding="utf-8")
+    with pytest.raises(OSError):
+        run_command(stand_in, "lint", [], tmp_path / "work", tmp_path / "logs", 30)
+    with pytest.raises(OSError):
+        run_engine(stand_in, "run", tmp_path / "work", tmp_path / "logs", {}, 30)
     started = time.monotonic()
     assert Startup(stand_in, tmp_path, "run").enter() is True
     assert time.monotonic() - started < 1

@@ -37,7 +37,7 @@ init 999 python hide:
         import renpy.error as engine_error
         import renpy.execution as execution
 
-        PROTOCOL = 5
+        PROTOCOL = 6
         HARNESS_MARK = "zzz_renpytester_"
 
         # Settings arrive in a file: a list of branches to resume can be too long for an environment variable.
@@ -123,14 +123,27 @@ init 999 python hide:
 
         # ------------------------------------------------------------------------------- helpers
 
+        def script_file(filename):
+            """The name of a script file as findings give it: the source file, from the game's folder.
+
+            An older engine names a script it loaded compiled, out of an archive, after the compiled
+            file and without the folder: "script.rpyc" for "game/script.rpy" (spec ARCH-004)."""
+            filename = str(filename).replace("\\", "/")
+            if filename.endswith((".rpyc", ".rpymc")):
+                filename = filename[:-1]
+            relative = not filename.startswith(("game/", "renpy/", "common/", "/")) and ":" not in filename
+            if relative and filename.endswith((".rpy", ".rpym")):
+                filename = "game/" + filename
+            return filename
+
         def is_game_file(filename):
-            filename = filename.replace("\\", "/")
+            filename = script_file(filename)
             return not (filename.startswith("renpy/") or filename.startswith("common/") or HARNESS_MARK in filename)
 
         def location(name):
             try:
                 node = renpy.game.script.lookup(name)
-                return node.filename.replace("\\", "/"), node.linenumber
+                return script_file(node.filename), node.linenumber
             except Exception:
                 return None, None
 
@@ -144,7 +157,7 @@ init 999 python hide:
             name = node.name
             if isinstance(name, str):
                 return "label:" + name
-            return "%s#%s" % (node.filename.replace("\\", "/"), "|".join(str(part) for part in name[1:]))
+            return "%s#%s" % (script_file(node.filename), "|".join(str(part) for part in name[1:]))
 
         def story_statements():
             """Statements a playthrough could execute (spec EXP-005), as a name -> node mapping."""
@@ -169,7 +182,7 @@ init 999 python hide:
                     continue
                 if type(node).__name__ in not_story or getattr(node, "language", None) is not None:
                     continue
-                if node.filename.replace("\\", "/").startswith("game/tl/"):
+                if script_file(node.filename).startswith("game/tl/"):
                     continue
                 found[node.name] = node
 
@@ -229,7 +242,7 @@ init 999 python hide:
             """Every story statement, by file and by the label it sits under, for the coverage report."""
             files = {}
             for node in story.values():
-                files.setdefault(node.filename.replace("\\", "/"), []).append(node)
+                files.setdefault(script_file(node.filename), []).append(node)
 
             labels = {}
             for filename, nodes in files.items():
@@ -287,7 +300,7 @@ init 999 python hide:
             nodes = [
                 node for node in story.values()
                 if is_public_label(node) and node.name != "start" and not needs_arguments(node)]
-            nodes.sort(key=lambda n: (n.filename.replace("\\", "/"), n.linenumber, n.name))
+            nodes.sort(key=lambda n: (script_file(n.filename), n.linenumber, n.name))
             return [node.name for node in nodes]
 
         def finding(cls, severity, message_id, params, filename=None, line=None, trace=None, **extra):
@@ -1068,7 +1081,7 @@ init 999 python hide:
             return set(part[1].strip() for part in parse_text(text) if part[1] is not None)
 
         def place(node):
-            return node.filename.replace("\\", "/"), node.linenumber
+            return script_file(node.filename), node.linenumber
 
         # ---- While playing: can each translation of this line be shown right now? (TL-004)
 
@@ -1224,18 +1237,23 @@ init 999 python hide:
                 report_translation(
                     "variable-mismatch", "warning", "finding.variable_mismatch", params, filename, line, language)
 
+        def game_place(trace):
+            """The last place in the game's own files that a traceback passes through, or (None, None)."""
+            frames = [
+                frame for frame in traceback.extract_tb(trace)
+                if is_game_file(frame.filename) and script_file(frame.filename).startswith("game/")]
+            if not frames:
+                return None, None
+            return script_file(frames[-1].filename), frames[-1].lineno
+
         def switch_failed(failure):
             """Notes the exception being handled as a failure of the switch of language under way."""
-            frames = [
-                frame for frame in traceback.extract_tb(sys.exc_info()[2])
-                if is_game_file(frame.filename) and frame.filename.replace("\\", "/").startswith("game/")]
-            filename, line = (None, None)
-            if frames:
-                filename, line = frames[-1].filename.replace("\\", "/"), frames[-1].lineno
+            filename, line = game_place(sys.exc_info()[2])
             state["switching"].append((failure, filename, line, traceback.format_exc()))
 
-        def switch_to(language):
-            """Makes `language` the game's language, which runs its translate python and style blocks."""
+        def switch_to(language, report=True):
+            """Makes `language` the game's language, which runs its translate python and style blocks.
+            Returns whether that worked; a failure is a finding unless `report` is false."""
             # Older engines let an exception in those blocks out of change_language. Newer ones run
             # the blocks as script, report the exception the way they report one in the story, and
             # carry on; report_exception, below, catches those.
@@ -1246,7 +1264,7 @@ init 999 python hide:
                 if not state["switching"]:
                     switch_failed(failure)
             failures, state["switching"] = state["switching"], None
-            for failure, filename, line, trace in failures[:1]:
+            for failure, filename, line, trace in failures[:1] if report else []:
                 params = {"language": language, "type": type(failure).__name__, "message": str(failure)}
                 report_translation(
                     "language-switch", "error", "finding.language_switch", params, filename, line, language, trace)
@@ -1293,7 +1311,7 @@ init 999 python hide:
             for old, new in known.translations.items():
                 filename, line = known.translation_loc.get(old, (None, None))
                 if isinstance(new, str) and isinstance(filename, str) and is_game_file(filename):
-                    placed.append((filename.replace("\\", "/"), line, old, new))
+                    placed.append((script_file(filename), line, old, new))
             for filename, line, old, new in sorted(placed):
                 compared = check_translated_text(language, [old], new, filename, line)
                 if compared is not None:
@@ -1320,6 +1338,187 @@ init 999 python hide:
             return False
 
         renpy.arguments.register_command("renpytester_translations", translations_command)
+
+        # ------------------------------------------------------------- menu screens (spec 4.8)
+        #
+        # Playing the story never opens the menus: the preferences, saving and loading, the history
+        # and the rest. Each of those screens that the game defines is built here the way the engine
+        # builds it to show it, with nothing drawn: in the game's own language, and then in each
+        # language that is checked. A process of its own does this and plays nothing, because the
+        # set-up code of a language changes the game's state.
+
+        MENU_SCREENS = ("main_menu", "preferences", "save", "load", "history", "about", "help", "confirm")
+        screens_only = bool(settings.get("screens"))
+
+        def screen_finding(cls, message_id, params, filename, line, language, trace=None):
+            emit(
+                "finding", cls=cls, severity="error", message_id=message_id, params=params, file=filename,
+                line=line, label=None, path=[], traceback=trace, node=None, possible=False, stage="screens",
+                language=language)
+
+        def screen_place(screen):
+            try:
+                return script_file(screen.location[0]), int(screen.location[1])
+            except Exception:
+                return None, None
+
+        def screen_arguments(name, screen):
+            """What to show a screen with, or None when it asks for something nobody can guess."""
+            given = {}
+            if name == "confirm":
+                # What the engine gives this screen: a question, and what its two answers do.
+                given = {"message": "", "yes_action": store.NullAction(), "no_action": store.NullAction()}
+            parameters = getattr(screen, "parameters", None)
+            if hasattr(parameters, "apply"):
+                try:
+                    parameters.apply((), dict(given))
+                except Exception:
+                    return None
+            return given
+
+        class NoRenderer(object):
+            """Answers what a screen may ask of the renderer, when there is none because nothing is
+            drawn. The standard preferences screen asks how big the window is and may be."""
+
+            info = {"renderer": "sw", "resizable": True, "additive": True}
+
+            def get_physical_size(self):
+                return (config.screen_width, config.screen_height)
+
+        def build_screen(name, given):
+            """Builds a screen as the engine does before it draws one. Returns what it is made of."""
+            stand_in = renpy.display.draw is None
+            if stand_in:
+                renpy.display.draw = NoRenderer()
+            renpy.show_screen(name, **given)
+            try:
+                shown = renpy.get_screen(name)
+                if shown is not None:
+                    shown.update()
+                    # What the engine asks of everything on screen as an interaction starts: this is
+                    # where buttons work out whether they can be pressed.
+                    shown.visit_all(lambda d: d.per_interact())
+                return shown
+            finally:
+                renpy.hide_screen(name)
+                if stand_in:
+                    renpy.display.draw = None
+
+        def check_screen_contents(screen, shown, seen):
+            """Looks at a screen that could be built for what only drawing it would have shown:
+            broken text tags and picture files that are not there (ARCH-007, ERR-013)."""
+            default_place = screen_place(screen)
+
+            def note(cls, message_id, params, place, key):
+                if (cls, place, key) not in seen:
+                    seen.add((cls, place, key))
+                    screen_finding(cls, message_id, params, place[0], place[1], None)
+
+            def place_of(d):
+                place = getattr(d, "_location", None)
+                try:
+                    return script_file(place[0]), int(place[1])
+                except Exception:
+                    return default_place
+
+            files = []
+
+            def visit(d):
+                if isinstance(d, renpy.text.text.Text):
+                    text = "".join(part for part in d.text if isinstance(part, str))
+                    error = tag_error(text)
+                    if error:
+                        note("bad-text", "finding.bad_text", {"problem": error, "text": text[:200]}, place_of(d), text)
+                # The files this needs, asked for the way the engine's lint asks (ERR-003).
+                before = len(files)
+                try:
+                    d.predict_one()
+                except Exception:
+                    pass
+                for filename in files[before:]:
+                    if isinstance(filename, str) and not loadable(filename, "images"):
+                        note("missing-file", "finding.missing_file", {"file": filename}, place_of(d), filename)
+
+            previous = renpy.display.predict.image
+            renpy.display.predict.image = lambda image: files.extend(image.predict_files())
+            try:
+                shown.visit_all(visit)
+            finally:
+                renpy.display.predict.image = previous
+
+        def check_screen(name, screen, given, language, own_language):
+            """Builds one screen in the language the game is in now. Returns what it is made of, or
+            None when it could not be built, which is reported."""
+            try:
+                return build_screen(name, given)
+            except Exception as failure:
+                trace = sys.exc_info()[2]
+                frames = traceback.extract_tb(trace)
+                if frames and HARNESS_MARK in frames[-1].filename.replace("\\", "/"):
+                    raise  # Our own mistake, not the screen's (NFR-004).
+                filename, line = game_place(trace)
+                if filename is None:
+                    filename, line = screen_place(screen)
+                params = {"screen": name, "type": type(failure).__name__, "message": str(failure)}
+                message_id = "finding.screen_error"
+                if not own_language:
+                    params["language"] = language
+                    message_id = "finding.screen_error.language"
+                screen_finding("screen-error", message_id, params, filename, line, language, traceback.format_exc())
+                return None
+
+        def check_screens():
+            """Builds every menu screen the game defines, in every language that is checked."""
+            try:
+                # The values the game gives its variables as a new game starts, and its starting
+                # language: what the engine does before the first statement of the story. Some
+                # engine versions have given the variables their values by now; those are left alone.
+                renpy.execute_default_statement(False)
+                init_language = getattr(store, "_init_language", None)
+                if init_language is not None:
+                    init_language()
+            except Exception as failure:
+                filename, line = game_place(sys.exc_info()[2])
+                # The game fails as it starts, which is what playing it reports too, in the same words.
+                screen_finding(
+                    "load-failure", "finding.load_failure",
+                    {"message": "%s: %s" % (type(failure).__name__, failure)}, filename, line, None,
+                    traceback.format_exc())
+                emit("screens", blocked=True, screens=[], skipped=[], languages=[], not_switched=[])
+                return
+
+            own = renpy.game.preferences.language
+            names = [name for name in MENU_SCREENS if renpy.has_screen(name)]
+            given = {}
+            for name in names:
+                given[name] = screen_arguments(name, renpy.display.screen.get_screen_variant(name))
+            skipped = [name for name in names if given[name] is None]
+            broken = set()
+            seen = set()
+            checked = []
+            not_switched = []
+
+            for language in [own] + [name for name in languages if name != own]:
+                if language != own and not switch_to(language, report=False):
+                    not_switched.append(language)  # The translation check says why (TL-002).
+                    continue
+                checked.append(language)
+                for name in names:
+                    # A screen that cannot be shown at all is reported once, not once for each language.
+                    if given[name] is None or name in broken:
+                        continue
+                    screen = renpy.display.screen.get_screen_variant(name)
+                    shown = check_screen(name, screen, given[name], language, language == own)
+                    if language != own:
+                        continue
+                    if shown is None:
+                        broken.add(name)
+                    else:
+                        check_screen_contents(screen, shown, seen)
+
+            emit(
+                "screens", blocked=False, screens=[name for name in names if given[name] is not None],
+                skipped=skipped, languages=checked, not_switched=not_switched)
 
         # ------------------------------------------------ exceptions (ERR-002, RUN-011, NFR-004)
 
@@ -1374,6 +1573,16 @@ init 999 python hide:
             if state["starts"] > 1:
                 # The engine is starting the game again: the story returned to the main menu.
                 next_path("end")
+
+            if screens_only:
+                # This process builds the menu screens and plays nothing (spec 4.8).
+                try:
+                    check_screens()
+                except Exception as failure:
+                    emit(
+                        "harness_error", message="%s: %s" % (type(failure).__name__, failure),
+                        traceback=traceback.format_exc())
+                finish()
 
             # A game may leave each language's script unread until the player picks that language.
             # The translations are needed now, to try them out as their lines are played (TL-004).

@@ -207,10 +207,12 @@ def run_engine(game, command, work_dir, log_dir, settings, timeout, on_event=Non
     flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
     result = EngineRun()
-    if not startup.enter(cancel):
-        result.cancelled = True
-        return result
+    # The file is opened before the turn is taken: a turn held by something that then failed
+    # would never be given up, and the next process would wait for ever.
     with open(output_file, "w", encoding="utf-8", errors="replace") as output:
+        if not startup.enter(cancel):
+            result.cancelled = True
+            return result
         try:
             process = subprocess.Popen(
                 cmd, env=env, stdout=output, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
@@ -266,6 +268,8 @@ def run_command(game, command, arguments, work_dir, log_dir, timeout, cancel=Non
     """
     work_dir = Path(work_dir)
     log_dir = Path(log_dir)
+    work_dir.mkdir(parents=True, exist_ok=True)
+    log_dir.mkdir(parents=True, exist_ok=True)
     startup = Startup(game, work_dir, command)
     env = build_environment(work_dir / "unused.jsonl", {}, log_dir, loaded=startup.marker)
     del env["RENPYTESTER_EVENTS"]
@@ -276,9 +280,9 @@ def run_command(game, command, arguments, work_dir, log_dir, timeout, cancel=Non
     flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
     output_file = log_dir / ("output-%s.txt" % command)
     code = None
-    if not startup.enter(cancel):
-        return None, ""
     with open(output_file, "wb") as output:
+        if not startup.enter(cancel):
+            return None, ""
         try:
             process = subprocess.Popen(
                 cmd, env=env, stdout=output, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,

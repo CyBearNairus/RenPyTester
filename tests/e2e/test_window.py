@@ -219,6 +219,7 @@ def test_choices_in_the_window_change_the_run_and_the_command(open_window, game_
 
     window.stage_vars["lint"].set(False)
     window.stage_vars["routes"].set(False)
+    window.stage_vars["screens"].set(False)
     window.language_vars["portuguese"].set(False)
     window.choices_changed()
     assert "--stages translations" in window.command_var.get()
@@ -249,6 +250,7 @@ def test_cancel_stops_the_game_restores_the_folder_and_keeps_what_was_found(open
     driver.choose(game)
     window.stage_vars["lint"].set(False)
     window.stage_vars["translations"].set(False)
+    window.stage_vars["screens"].set(False)
     window.choices_changed()
 
     window.run_button.invoke()
@@ -288,6 +290,7 @@ def test_closing_the_window_during_a_run_stops_the_run_first(open_window, game_c
     driver.choose(game)
     window.stage_vars["lint"].set(False)
     window.stage_vars["translations"].set(False)
+    window.stage_vars["screens"].set(False)
     window.choices_changed()
     window.run_button.invoke()
     assert session.busy, (window.detected_var.get(), window.status_var.get(), window.result_var.get())
@@ -323,6 +326,7 @@ def test_sandbox_can_be_chosen_and_its_copies_managed_from_the_window(open_windo
     driver.choose(game)
     window.stage_vars["lint"].set(False)
     window.stage_vars["translations"].set(False)
+    window.stage_vars["screens"].set(False)
     window.sandbox_var.set(True)
     window.choices_changed()
     assert "--sandbox" in window.command_var.get()
@@ -493,12 +497,12 @@ def test_window_opens_with_only_the_game_and_keeps_the_rest_one_click_away(open_
     window.choices_changed()
     window.advanced_button.invoke()
     assert window.advanced_frame.winfo_manager() == ""
-    assert "--stages routes,translations" in window.command_var.get()
+    assert "--stages routes,translations,screens" in window.command_var.get()
     window.advanced_button.invoke()
     window.close()
     remembered = gui.Session()
     remembered.load()
-    assert (remembered.advanced, remembered.stages) == (True, ["routes", "translations"])
+    assert (remembered.advanced, remembered.stages) == (True, ["routes", "translations", "screens"])
 
 
 @pytest.mark.req("GUI-011", "GUI-007", "GUI-008", "REP-005")
@@ -508,6 +512,7 @@ def test_report_folder_can_be_chosen_in_the_window(open_window, game_copy, tmp_p
     driver.choose(game_copy("clean"))
     window.stage_vars["lint"].set(False)
     window.stage_vars["translations"].set(False)
+    window.stage_vars["screens"].set(False)
     window.choices_changed()
 
     # The box shows where reports will go even though nobody has chosen.
@@ -589,6 +594,7 @@ def test_window_wears_the_colours_of_the_html_report(open_window, game_copy, dar
     driver.choose(game_copy("two_bugs"))
     window.stage_vars["lint"].set(False)
     window.stage_vars["translations"].set(False)
+    window.stage_vars["screens"].set(False)
     window.choices_changed()
     driver.run()
     assert window.count_vars["error"].get() == "2"
