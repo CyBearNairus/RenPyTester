@@ -2,8 +2,8 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Version 0.31 **approved** by the project owner on 2026-10-07. |
-| Last updated | 2026-10-07 |
+| Status | Version 0.33 **approved** by the project owner on 2026-10-08. Version 0.34 adds DIST-008 and DIST-009, and how they were done waits for the owner's approval (D35). |
+| Last updated | 2026-10-08 |
 
 This document is the source of truth for what RenPyTester does.
 Code is written to satisfy requirements listed here; behaviour that is not listed here is not part of the product.
@@ -342,6 +342,9 @@ Translation testing MUST NOT multiply run time by the number of languages: check
 | DIST-004 | SHOULD | Installable as a package (`pipx install`, `uv tool install`) exposing the `renpytester` command. Every file of the package that is not code is listed as its data, and a test fails when one is not. |
 | DIST-005 | MUST | Executables are built by CI from a tagged commit and attached to a GitHub release. No hand-built releases. The same process can be started by hand as a rehearsal, which builds and tests everything and releases nothing. The tag is `v` followed by the version in the source (`v0.1.0`); a tag that is anything else is refused and nothing is released. Before an executable is attached, the linters, the unit tests and the end-to-end tests (DIST-006) have passed on the system it was built on: the end-to-end tests against the executable, and from source those that cannot be run against it. The rest are run from source on every push (7.3), not a second time for a release. A tag takes the place of a rehearsal of the same commit that is still going. The files are named after the system, not the version (`renpytester-windows-x64.exe`), so that a link to the latest one keeps working. On Windows that name is the window program's, since it is the one to download and double-click, and the console program is `renpytester-windows-x64-console.exe`. |
 | DIST-006 | MUST | The executable and the from-source run behave identically; the test suite's end-to-end tests run against both. With the `RENPYTESTER_EXE` environment variable naming an executable, the end-to-end tests that go through the command line start it in place of the source; those that reach into the program itself (the window's, and stopping a run at a chosen moment) cannot, and are skipped. They are run this way on the oldest and the newest supported engine. On Windows the whole suite is run against the console program; the window program, which is the same code, is given the tests that are about the executable itself. The executable does not hand its own libraries on to the programs it starts: the place it unpacked them to is taken out of the search for libraries before the game's engine is started, so that the engine loads its own. |
+| DIST-007 | SHOULD | The executable holds no network code. The program opens no connection, so Python's network modules (`socket`, `ssl`, `http`, `ftplib`, `urllib.request`) and the libraries they load are left out of the build, and a test fails when the executable holds one of them or the program's own code imports one. An executable that cannot go on line by itself is one thing fewer for an antivirus program to mistrust; no build can promise that none of them will. |
+| DIST-008 | SHOULD | The Windows executables of a release are signed, by SignPath Foundation, which signs open-source programs at no charge. They are signed by the release process (DIST-005) and never by hand: the executables that passed their tests are handed over as they were built, each signing is approved at SignPath, and the signed files are given the tests that are about the executable itself, and looked at for their signature, before they take the place of the unsigned ones. A repository that has not been given its settings at SignPath releases them unsigned and says so on the page of the run, as does a rehearsal, which signs nothing. The README carries the code signing policy that SignPath Foundation asks for: who signs, who commits and who approves, and that the program sends nothing anywhere unasked (DIST-007). |
+| DIST-009 | SHOULD | `python tools/virustotal.py FILE...` sends executables to VirusTotal and says how many antivirus programs call each harmful, which, and by what name. Its API key comes from the `VIRUSTOTAL_API_KEY` environment variable, or else from a `.env` file at the root of the repository, which git ignores; the key is never shown, and with no key nothing is sent and the tool says so. The release process, rehearsals included, asks this about the Windows executables it would release, signed when they are (DIST-008), and puts the answer on the page of the run. The verdicts hold nothing back: the tool fails only when the question could not be asked, and that does not stop a release either. A development tool, with nothing of it in the program. |
 
 ### 4.14 Graphical interface (GUI)
 
@@ -519,12 +522,15 @@ Still unverified, and the requirements that depend on them:
 
 Open:
 
-None.
+| # | Decision |
+| --- | --- |
+| D35 | Asked for by the owner on 2026-10-08: the executables are to be signed, by SignPath Foundation, and looked at through VirusTotal's API, by hand and by the release process (DIST-008, DIST-009). How that was done, version 0.34, is for the owner to approve. The signing steps cannot run before SignPath Foundation accepts the project, so they are written and not yet tried. |
 
 Settled on 2026-10-06:
 
 | # | Decision |
 | --- | --- |
+| D34 | Version 0.32 approved on 2026-10-08, and with it DIST-007. Three antivirus programs out of those VirusTotal asks called the window program of v0.1.3 harmful, as they do many unsigned programs made with PyInstaller. The build packed Python's network modules although nothing uses them; leaving them out is the part of this that the build tool can do. The owner has also asked for the executables to be signed, which is not specified yet: it waits for the choice of who signs them. |
 | D33 | Version 0.30 approved on 2026-10-07, and with it how D32 was done (DIST-005, section 7.3): a release runs from source only the end-to-end tests the executable cannot be given, so a commit is tagged on the strength of the CI run of its push for the rest; and on Windows and macOS the unit tests are run on the oldest and the newest Python only. |
 | D32 | Asked for by the owner on 2026-10-07, after releasing v0.1.3 took three workflow runs of close to an hour doing much the same: CI is to do less and take less time. Tests are run several at a time; a release does not repeat from source what CI has run; a tag takes the place of a rehearsal of the same commit, and a push that of an earlier one still being checked (DIST-005, 7.3). |
 | D31 | Version 0.28 amendments approved on 2026-10-07: RUN-006 made precise, and EXP-021 added, with EXP-006 following it. A path goes round a hub again while that reaches something new, so a game that is walked around is played much further than before; such a run takes longer and can be the one that `--max-time` stops. |
@@ -596,3 +602,6 @@ Settled on 2026-10-06:
 | 2026-10-07 | 0.29 | D31 settled (0.28 approved). Nothing is waiting for approval. |
 | 2026-10-07 | 0.30 | Owner's request (D32): a shorter CI. DIST-005 says which tests a release runs from source, and that a tag takes the place of a rehearsal; section 7.3 says that end-to-end tests are run several at a time and which Pythons are tried on which system. D33 opened. |
 | 2026-10-07 | 0.31 | D33 settled (0.30 approved). Nothing is waiting for approval. |
+| 2026-10-08 | 0.32 | Added DIST-007 (the executable holds no network code), after antivirus programs took the v0.1.3 executable for a harmful one. D34 opened. |
+| 2026-10-08 | 0.33 | D34 settled (0.32 approved). Nothing is waiting for approval. |
+| 2026-10-08 | 0.34 | Owner's requests (D35): added DIST-008 (the Windows executables are signed by SignPath Foundation) and DIST-009 (what antivirus programs make of the executables is asked of VirusTotal). D35 opened. |

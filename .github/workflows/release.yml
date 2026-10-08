@@ -146,6 +146,53 @@ jobs:
           if [ -n "${{ matrix.windowed }}" ]; then
             cp "${{ matrix.windowed }}" "release/${{ matrix.windowed_asset }}"
           fi
+
+      # The Windows executables of a release are signed by SignPath Foundation (DIST-008), once the
+      # repository has been given its settings there: the SIGNPATH_* variables and the
+      # SIGNPATH_API_TOKEN secret. Until then, and in a rehearsal, they are left unsigned.
+      # Each signing is approved by hand at SignPath, which this waits for.
+      - name: Hand the Windows executables over for signing
+        id: unsigned
+        if: matrix.windowed && github.ref_type == 'tag' && vars.SIGNPATH_ORGANIZATION_ID != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: unsigned-windows
+          path: release/
+          if-no-files-found: error
+      - name: Sign the Windows executables
+        if: steps.unsigned.outcome == 'success'
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: signed
+      # What is released is the signed file, so it is the signed file that has to start and be signed.
+      - name: Tests of the executable itself, the signed programs
+        if: steps.unsigned.outcome == 'success'
+        run: |
+          for name in "${{ matrix.asset }}" "${{ matrix.windowed_asset }}"; do
+            RENPYTESTER_SIGNED=1 RENPYTESTER_EXE="$PWD/signed/$name" python -m pytest tests/e2e/test_executable.py
+            cp "signed/$name" "release/$name"
+          done
+          echo "The Windows executables are signed." >> "$GITHUB_STEP_SUMMARY"
+      - name: Say that the Windows executables are not signed
+        if: matrix.windowed && steps.unsigned.outcome != 'success'
+        run: echo "The Windows executables are **not signed**." >> "$GITHUB_STEP_SUMMARY"
+
+      # What antivirus programs make of the Windows executables, for the run's page (DIST-009).
+      # Their verdicts hold nothing back: a wrong one is theirs to put right.
+      - name: Ask VirusTotal about the Windows executables
+        if: matrix.windowed
+        continue-on-error: true
+        env:
+          VIRUSTOTAL_API_KEY: ${{ secrets.VIRUSTOTAL_API_KEY }}
+        run: python tools/virustotal.py "release/${{ matrix.windowed_asset }}" "release/${{ matrix.asset }}"
+
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.asset }}

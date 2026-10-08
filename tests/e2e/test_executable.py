@@ -59,6 +59,17 @@ def test_windows_executable_is_the_kind_its_name_says_and_carries_its_properties
         assert text.encode("utf-16-le") in data, text
 
 
+@pytest.mark.skipif(not os.environ.get("RENPYTESTER_SIGNED"), reason="only a release's signed executable is signed")
+@pytest.mark.req("DIST-008")
+def test_signed_windows_executable_carries_a_signature(exe):
+    data = exe.read_bytes()[:4096]
+    header = int.from_bytes(data[0x3C:0x40], "little")
+    # The fifth entry of a 64-bit program's table of directories says where its certificates are.
+    table = header + 0x18 + 0x70 + 4 * 8
+    assert int.from_bytes(data[table:table + 4], "little") > 0
+    assert int.from_bytes(data[table + 4:table + 8], "little") > 0
+
+
 @pytest.mark.req("DIST-002", "GUI-013", "I18N-001")
 def test_executable_carries_the_harness_the_window_and_every_data_file(exe):
     readers = pytest.importorskip("PyInstaller.archive.readers")
@@ -79,6 +90,18 @@ def test_executable_carries_the_harness_the_window_and_every_data_file(exe):
     modules = archive.open_embedded_archive("PYZ.pyz").toc
     for module in ("tkinter", "tkinter.ttk", "renpytester.gui", "renpytester.report.html_report"):
         assert module in modules, module
+
+
+@pytest.mark.req("DIST-007")
+def test_executable_holds_no_network_code(exe):
+    readers = pytest.importorskip("PyInstaller.archive.readers")
+    archive = readers.CArchiveReader(str(exe))
+    libraries = {name.replace("\\", "/").split("/")[-1].lower() for name in archive.toc}
+    for library in libraries:
+        assert not library.startswith(("_socket", "_ssl", "libssl")), library
+    modules = archive.open_embedded_archive("PYZ.pyz").toc
+    for module in ("socket", "ssl", "http.client", "ftplib", "urllib.request"):
+        assert module not in modules, module
 
 
 @pytest.mark.req("DIST-006", "DIST-002", "NFR-001")

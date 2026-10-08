@@ -7,7 +7,7 @@ Runnable from source with plain Python or as a single-file executable, from a te
 
 **Milestones M0 (spikes), M1 (walking skeleton), M2 (lint stage), M3a (exploration), M3b (checks that need no rendering), M3c (getting past minigames), M3d (label runs), M3e (parallel processes) and M4 (translations) are done.**
 **M5 (reports and config), M6 (sandbox), M7 (graphical interface), M8 (packaging) and M9 (hardening) are done too: every milestone of the spec is built.**
-[docs/SPEC.md](docs/SPEC.md) version 0.31 is approved, and nothing in it is waiting for the owner.
+[docs/SPEC.md](docs/SPEC.md) version 0.33 is approved; version 0.34 adds DIST-008 (signing) and DIST-009 (VirusTotal), and how they were done waits for the owner (D35).
 What the spec still lists and nobody has built are SHOULD and COULD rows only; `tests/unit/test_project.py` fails when a MUST requirement is named by no test.
 What works today: `python -m renpytester GAME` finds the game and its engine and explores every choice of every menu with no window, using in-memory snapshots, and carries on after a crash or a hang.
 While playing it checks for undefined images, missing image, audio and movie files, broken text tags and menus with nothing to choose.
@@ -170,6 +170,17 @@ The ones that cause real damage if forgotten:
 - **The executable must not pass its own libraries on to the engine.**
   `launcher.leave_bundle`, called first thing by `cli.main`, takes the folder the executable unpacked itself into out of the search for libraries.
   Anything new that starts another program is covered by it; do not undo it.
+- **The executable holds no network code, and the program must not come to need any.**
+  `build_exe.NO_NETWORK` leaves Python's network modules out of the build (DIST-007); code that imports one of them works from source and fails in the executable, and a unit test looks for that.
+  Antivirus programs take unsigned PyInstaller executables for harmful ones now and then; this gives them less to go on, and does not stop them.
+- **The Windows executables are signed by the release workflow or not at all** (DIST-008).
+  SignPath Foundation signs them, on a tag only, once the repository has its settings there; without them a release is unsigned and says so.
+  The settings are the variables `SIGNPATH_ORGANIZATION_ID`, `SIGNPATH_PROJECT_SLUG` and `SIGNPATH_SIGNING_POLICY_SLUG`, and the secret `SIGNPATH_API_TOKEN`.
+  Those steps have never run: the project has not been accepted there yet, so expect to put them right at the first signed release.
+  The *Code signing policy* in the README is something SignPath Foundation requires; a test keeps its wording.
+- **`tools/virustotal.py` never shows its key, and its verdicts stop nothing** (DIST-009).
+  The key is `VIRUSTOTAL_API_KEY`, in the environment or in the git-ignored `.env`; never print it, and never read `.env` aloud.
+  A file sent to VirusTotal goes to every antivirus maker: send only executables that are to be released.
 - **On Windows there are two executables, because one program cannot be both kinds.**
   A console program started by a double click is given a console window before any of its code runs; hiding it afterwards still shows it for a moment, and does not work at all where Windows Terminal is the default.
   A window program never has one, but no terminal waits for it or gets its exit code.
@@ -240,6 +251,7 @@ Paths to these come from environment variables.
 - Tests against the executable: set `RENPYTESTER_EXE` to `dist/renpytester.exe` and run `python -m pytest tests/e2e`, with a Python that has PyInstaller, on both SDKs.
   Build again first: the executable holds the code as it was when it was built.
   Tests marked `source` are skipped then, because they reach into the program itself.
+- Ask VirusTotal about a build: `python tools/virustotal.py dist/renpytesterw.exe dist/renpytester.exe`.
 - Release: set `__version__`, commit, and push the tag `v` plus that version; `.github/workflows/release.yml` does the rest.
 
 ## Layout
@@ -252,7 +264,7 @@ Paths to these come from environment variables.
   The JUnit and HTML writers take the JSON report's data, never the `Report` object: what is not in the JSON cannot be in them.
 - `renpytester/harness/zzz_renpytester_harness.rpy`: the script injected into the game.
 - `tests/fixtures/games/`: one small game per behaviour under test. A new finding class needs a new fixture.
-- `tools/`: development tools. `build_exe.py` builds the executable, `make_icon.py` draws the icon, `lint_rpy.py` lints Ren'Py scripts.
+- `tools/`: development tools. `build_exe.py` builds the executable, `virustotal.py` asks VirusTotal about one, `make_icon.py` draws the icon, `lint_rpy.py` lints Ren'Py scripts.
 - `.github/workflows/`: `ci.yml` runs the linters, the unit tests and the end-to-end tests from source on every push; `release.yml` builds and publishes the executables from a tag, or rehearses that when started by hand.
   A release runs the end-to-end tests against the executable, and from source only those marked `source`; the rest from source are CI's, so do not tag a commit whose CI run failed.
   A step added to either workflow that repeats what the other already does for the same commit is a step too many.

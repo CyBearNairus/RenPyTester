@@ -94,3 +94,16 @@ Everything else is in [docs/advanced.md](docs/advanced.md): all the options, cho
 The format of the JSON report is in [docs/report-schema.md](docs/report-schema.md).
 
 RenPyTester is free software under the [GPL-3.0 licence](LICENSE).
+
+## Code signing policy
+
+Signing is being set up: the releases so far, up to v0.1.3, are not signed.
+
+Free code signing provided by [SignPath.io](https://signpath.io/), certificate by [SignPath Foundation](https://signpath.org/).
+
+- Committers and reviewers: [CyBearNairus](https://github.com/CyBearNairus)
+- Approvers: [CyBearNairus](https://github.com/CyBearNairus)
+
+The Windows programs of a release are built from this repository's source by GitHub, tested there, and signed as they were built.
+
+This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it.

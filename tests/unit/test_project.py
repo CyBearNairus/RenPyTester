@@ -118,7 +118,9 @@ def test_a_release_runs_every_end_to_end_test_once_and_ci_runs_them_from_source(
     release = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
     # From source only what the executable cannot be given; then the executable on each engine, and
     # the window program on Windows.
-    assert release.count("pytest tests/e2e") == 4
+    # A fifth run is of other files: the signed programs, given the tests about the executable (DIST-008).
+    assert release.count("pytest tests/e2e") == 5
+    assert release.count('RENPYTESTER_EXE="$PWD/signed/$name" python -m pytest tests/e2e/test_executable.py') == 1
     assert release.count('python -m pytest tests/e2e -m source -n "$E2E_WORKERS"') == 1
     assert release.count('RENPYTESTER_EXE="$PWD/${{ matrix.built }}"') == 2
     assert release.count('RENPYTESTER_EXE="$PWD/${{ matrix.windowed }}"') == 1

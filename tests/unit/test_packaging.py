@@ -89,6 +89,111 @@ def test_windows_gets_a_window_program_with_no_console_beside_the_console_progra
     assert "--hide-console" not in command and "--hide-console" not in build_exe.command(entry)
 
 
+@pytest.mark.req("DIST-007")
+def test_executable_is_built_without_network_modules_and_the_program_imports_none(build_exe):
+    command = build_exe.command(ROOT / "build" / "entry.py")
+    left_out = {command[at + 1] for at, word in enumerate(command) if word == "--exclude-module"}
+    assert {"socket", "_socket", "ssl", "_ssl", "http", "ftplib", "urllib.request"} <= left_out
+
+    # Left out of the executable, they must not be asked for: a Python of its own, so that what the
+    # tests themselves have loaded does not count.
+    modules = sorted(
+        "renpytester." + file.relative_to(PACKAGE).with_suffix("").as_posix().replace("/", ".")
+        for file in PACKAGE.rglob("*.py") if file.name not in ("__init__.py", "__main__.py", "silent_editor.py"))
+    assert "renpytester.gui" in modules and "renpytester.report.html_report" in modules
+    code = "import sys, %s\nprint(sorted(set(sys.modules) & set(%r)))" % (", ".join(modules), sorted(left_out))
+    done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, cwd=str(ROOT))
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.strip() == "[]"
+
+
+@pytest.mark.req("DIST-008")
+def test_release_signs_the_windows_executables_only_when_it_has_been_set_up_to():
+    workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    assert "signpath/github-action-submit-signing-request@" in workflow
+    # Never in a rehearsal, never without the settings, and the signed files are tested before they are released.
+    assert "if: matrix.windowed && github.ref_type == 'tag' && vars.SIGNPATH_ORGANIZATION_ID != ''" in workflow
+    assert workflow.count("if: steps.unsigned.outcome == 'success'") == 2
+    assert "RENPYTESTER_SIGNED=1" in workflow and "secrets.SIGNPATH_API_TOKEN" in workflow
+
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "## Code signing policy" in readme
+    assert "Free code signing provided by [SignPath.io](https://signpath.io/), certificate by " in readme
+    assert "will not transfer any information to other networked systems unless specifically requested" in readme
+
+
+@pytest.fixture(scope="module")
+def virustotal():
+    spec = importlib.util.spec_from_file_location("virustotal", ROOT / "tools" / "virustotal.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.req("DIST-009")
+def test_virustotal_key_comes_from_the_environment_or_the_env_file_and_nothing_is_sent_without_one(
+        virustotal, tmp_path, monkeypatch, capsys):
+    env_file = tmp_path / ".env"
+    assert virustotal.key_from(env_file, {}) is None
+    env_file.write_text("# keys\nOTHER=1\nVIRUSTOTAL_API_KEY = \"from-file\"\n", encoding="utf-8")
+    assert virustotal.key_from(env_file, {}) == "from-file"
+    assert virustotal.key_from(env_file, {"VIRUSTOTAL_API_KEY": "from-environment"}) == "from-environment"
+    assert virustotal.key_from(env_file, {"VIRUSTOTAL_API_KEY": " "}) == "from-file"
+
+    def never(*_args, **_kwargs):
+        raise AssertionError("something was sent")
+
+    program = tmp_path / "program.exe"
+    program.write_bytes(b"MZ")
+    summary = tmp_path / "summary.md"
+    monkeypatch.setattr(virustotal, "ROOT", tmp_path / "nowhere")
+    monkeypatch.setattr(virustotal.urllib.request, "urlopen", never)
+    monkeypatch.delenv("VIRUSTOTAL_API_KEY", raising=False)
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    assert virustotal.main([str(program)]) == 0
+    assert "Nothing was sent" in capsys.readouterr().out
+    assert "Not asked" in summary.read_text(encoding="utf-8")
+    assert virustotal.main([str(tmp_path / "missing.exe")]) == 1
+
+
+@pytest.mark.req("DIST-009")
+def test_virustotal_verdicts_are_reported_and_hold_nothing_back(virustotal, tmp_path, monkeypatch, capsys):
+    results = {
+        "Good": {"category": "undetected", "result": None},
+        "Kind": {"category": "harmless", "result": None},
+        "Wary": {"category": "malicious", "result": "W32.Malware.0000"},
+        "Unsure": {"category": "suspicious", "result": None},
+        "Slow": {"category": "timeout", "result": None},
+        "Other": {"category": "type-unsupported", "result": None},
+    }
+    assert virustotal.verdicts(results) == (4, [("Unsure", "suspicious"), ("Wary", "W32.Malware.0000")])
+
+    body, content_type = virustotal.form("program.exe", b"MZ\x00\xff")
+    boundary = content_type.split("boundary=")[1]
+    assert content_type.startswith("multipart/form-data; ")
+    assert body.startswith(("--" + boundary + "\r\n").encode()) and body.endswith(("--" + boundary + "--\r\n").encode())
+    assert b'name="file"; filename="program.exe"' in body and b"\r\n\r\nMZ\x00\xff\r\n" in body
+
+    sent = []
+    program = tmp_path / "program.exe"
+    program.write_bytes(b"MZ")
+    summary = tmp_path / "summary.md"
+    monkeypatch.setattr(virustotal, "analyse", lambda key, file: sent.append((key, file)) or results)
+    monkeypatch.setenv("VIRUSTOTAL_API_KEY", "not-to-be-shown")
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    assert virustotal.main([str(program)]) == 0
+    assert sent == [("not-to-be-shown", program)]
+    said = capsys.readouterr().out + summary.read_text(encoding="utf-8")
+    assert "2 of 4 antivirus programs call it harmful" in said and "Wary: W32.Malware.0000" in said
+    assert "not-to-be-shown" not in said
+
+    def fail(key, file):
+        raise virustotal.Failed("VirusTotal could not be reached.")
+
+    monkeypatch.setattr(virustotal, "analyse", fail)
+    assert virustotal.main([str(program)]) == 1
+
+
 @pytest.mark.req("DIST-002")
 def test_executable_says_what_it_is_in_its_properties(build_exe):
     text = build_exe.version_info("renpytesterw.exe")

@@ -31,6 +31,11 @@ WINDOWED = NAME + "w"
 # the package's folder for the place to find modules in.
 ENTRY = "import sys\n\nfrom renpytester.cli import main\n\nsys.exit(main())\n"
 
+# Python's network modules, which the program never uses and PyInstaller would pack all the same,
+# because the standard library names them here and there. Left out, the executable holds no code
+# that can open a connection (DIST-007), which also gives antivirus programs less to mistrust.
+NO_NETWORK = ("socket", "_socket", "ssl", "_ssl", "http", "ftplib", "urllib.request")
+
 
 def about():
     """What the package says of itself: its version, author and address."""
@@ -89,6 +94,8 @@ def command(entry, name=NAME, windowed=False, version_file=None):
         "--specpath", str(BUILD), "--paths", str(ROOT), "--icon", str(PACKAGE / "assets" / "icon.ico")]
     if version_file is not None:
         cmd += ["--version-file", str(version_file)]
+    for module in NO_NETWORK:
+        cmd += ["--exclude-module", module]
     for file, folder in data_files():
         cmd += ["--add-data", "%s:%s" % (file, folder)]
     return cmd + [str(entry)]
