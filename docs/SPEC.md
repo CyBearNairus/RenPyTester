@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Version 0.33 **approved** by the project owner on 2026-10-08. Version 0.34 adds DIST-008 and DIST-009, and how they were done waits for the owner's approval (D35). |
+| Status | Version 0.33 **approved** by the project owner on 2026-10-08. Versions 0.34 and 0.35 add DIST-008, DIST-009 and DIST-010, and how they were done waits for the owner's approval (D35). |
 | Last updated | 2026-10-08 |
 
 This document is the source of truth for what RenPyTester does.
@@ -345,6 +345,7 @@ Translation testing MUST NOT multiply run time by the number of languages: check
 | DIST-007 | SHOULD | The executable holds no network code. The program opens no connection, so Python's network modules (`socket`, `ssl`, `http`, `ftplib`, `urllib.request`) and the libraries they load are left out of the build, and a test fails when the executable holds one of them or the program's own code imports one. An executable that cannot go on line by itself is one thing fewer for an antivirus program to mistrust; no build can promise that none of them will. |
 | DIST-008 | SHOULD | The Windows executables of a release are signed, by SignPath Foundation, which signs open-source programs at no charge. They are signed by the release process (DIST-005) and never by hand: the executables that passed their tests are handed over as they were built, each signing is approved at SignPath, and the signed files are given the tests that are about the executable itself, and looked at for their signature, before they take the place of the unsigned ones. A repository that has not been given its settings at SignPath releases them unsigned and says so on the page of the run, as does a rehearsal, which signs nothing. The README carries the code signing policy that SignPath Foundation asks for: who signs, who commits and who approves, and that the program sends nothing anywhere unasked (DIST-007). |
 | DIST-009 | SHOULD | `python tools/virustotal.py FILE...` sends executables to VirusTotal and says how many antivirus programs call each harmful, which, and by what name. Its API key comes from the `VIRUSTOTAL_API_KEY` environment variable, or else from a `.env` file at the root of the repository, which git ignores; the key is never shown, and with no key nothing is sent and the tool says so. The release process, rehearsals included, asks this about the Windows executables it would release, signed when they are (DIST-008), and puts the answer on the page of the run. The verdicts hold nothing back: the tool fails only when the question could not be asked, and that does not stop a release either. A development tool, with nothing of it in the program. |
+| DIST-010 | SHOULD | The project has a home page, `https://cybearnairus.github.io/RenPyTester/`, which GitHub Pages serves from the `docs/` folder of the main branch as it is, with no site builder. It says what the program does, shows the README's two pictures, says where to download the program, and carries the code signing policy and the statement of privacy that SignPath Foundation asks to find there (DIST-008). The page is one file, `docs/index.html`, in English, written by `tools/make_site.py` with the colours of the report and the window (GUI-015) and the program's icon inside it; it is committed, and a test fails when it is not what the tool writes. |
 
 ### 4.14 Graphical interface (GUI)
 
@@ -524,7 +525,7 @@ Open:
 
 | # | Decision |
 | --- | --- |
-| D35 | Asked for by the owner on 2026-10-08: the executables are to be signed, by SignPath Foundation, and looked at through VirusTotal's API, by hand and by the release process (DIST-008, DIST-009). How that was done, version 0.34, is for the owner to approve. The signing steps cannot run before SignPath Foundation accepts the project, so they are written and not yet tried. |
+| D35 | Asked for by the owner on 2026-10-08: the executables are to be signed, by SignPath Foundation, and looked at through VirusTotal's API, by hand and by the release process (DIST-008, DIST-009). How that was done, versions 0.34 and 0.35, is for the owner to approve. The signing steps cannot run before SignPath Foundation accepts the project, so they are written and not yet tried. SignPath Foundation asks for the address of a home page, so the owner asked for one on GitHub Pages as well (DIST-010). |
 
 Settled on 2026-10-06:
 
@@ -605,3 +606,4 @@ Settled on 2026-10-06:
 | 2026-10-08 | 0.32 | Added DIST-007 (the executable holds no network code), after antivirus programs took the v0.1.3 executable for a harmful one. D34 opened. |
 | 2026-10-08 | 0.33 | D34 settled (0.32 approved). Nothing is waiting for approval. |
 | 2026-10-08 | 0.34 | Owner's requests (D35): added DIST-008 (the Windows executables are signed by SignPath Foundation) and DIST-009 (what antivirus programs make of the executables is asked of VirusTotal). D35 opened. |
+| 2026-10-08 | 0.35 | Owner's request (D35): added DIST-010 (a home page on GitHub Pages). |

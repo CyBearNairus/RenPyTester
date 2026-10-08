@@ -7,7 +7,7 @@ Runnable from source with plain Python or as a single-file executable, from a te
 
 **Milestones M0 (spikes), M1 (walking skeleton), M2 (lint stage), M3a (exploration), M3b (checks that need no rendering), M3c (getting past minigames), M3d (label runs), M3e (parallel processes) and M4 (translations) are done.**
 **M5 (reports and config), M6 (sandbox), M7 (graphical interface), M8 (packaging) and M9 (hardening) are done too: every milestone of the spec is built.**
-[docs/SPEC.md](docs/SPEC.md) version 0.33 is approved; version 0.34 adds DIST-008 (signing) and DIST-009 (VirusTotal), and how they were done waits for the owner (D35).
+[docs/SPEC.md](docs/SPEC.md) version 0.33 is approved; versions 0.34 and 0.35 add DIST-008 (signing), DIST-009 (VirusTotal) and DIST-010 (the home page), and how they were done waits for the owner (D35).
 What the spec still lists and nobody has built are SHOULD and COULD rows only; `tests/unit/test_project.py` fails when a MUST requirement is named by no test.
 What works today: `python -m renpytester GAME` finds the game and its engine and explores every choice of every menu with no window, using in-memory snapshots, and carries on after a crash or a hang.
 While playing it checks for undefined images, missing image, audio and movie files, broken text tags and menus with nothing to choose.
@@ -274,6 +274,10 @@ Paths to these come from environment variables.
 - `docs/report-schema.md`: the JSON report format. Update it with any change to `model.py`.
 - `README.md` is for someone's first run and nothing more: getting the program, testing a game with the window or with one command, and reading the result.
   Every other feature is described in `docs/advanced.md`; a new option or feature goes there, not in the README.
-- `docs/images/`: the pictures in the README, of the window and of the HTML report after testing The Question.
+- `docs/index.html` is the home page, `https://cybearnairus.github.io/RenPyTester/`, which GitHub Pages serves from `docs/` on `main` (DIST-010).
+  It is written by `python tools/make_site.py`: change the page in that tool and run it, never in the file, and a test fails when the two differ.
+  Its code signing policy says what the README's does; change both together.
+  `docs/.nojekyll` keeps GitHub from running a site builder over the other documents.
+- `docs/images/`: the pictures in the README and on the home page, of the window and of the HTML report after testing The Question.
   They are made by running the real program, never drawn; make them again when the window or the report changes how it looks.
   The one thing changed in them is the folders shown, which are made-up ones under `C:\Games` (owner's instruction, 2026-10-07): a picture must not show the folders of the computer it was taken on.

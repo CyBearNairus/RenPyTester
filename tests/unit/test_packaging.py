@@ -2,6 +2,7 @@
 
 import importlib.util
 import os
+import re
 import subprocess
 import sys
 import tomllib
@@ -10,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from renpytester import __version__, cli, launcher
+from renpytester import __version__, cli, launcher, palette
 
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = ROOT / "renpytester"
@@ -120,6 +121,26 @@ def test_release_signs_the_windows_executables_only_when_it_has_been_set_up_to()
     assert "## Code signing policy" in readme
     assert "Free code signing provided by [SignPath.io](https://signpath.io/), certificate by " in readme
     assert "will not transfer any information to other networked systems unless specifically requested" in readme
+
+
+@pytest.mark.req("DIST-010", "DIST-008", "GUI-015")
+def test_home_page_is_what_its_tool_writes_and_carries_the_code_signing_policy():
+    spec = importlib.util.spec_from_file_location("make_site", ROOT / "tools" / "make_site.py")
+    make_site = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(make_site)
+    page = (ROOT / "docs" / "index.html").read_text(encoding="utf-8")
+    assert page == make_site.page(), "run python tools/make_site.py and commit docs/index.html"
+    assert (ROOT / "docs" / ".nojekyll").is_file()
+
+    for name in ("window.png", "report.png"):
+        assert 'src="images/%s"' % name in page and (ROOT / "docs" / "images" / name).is_file()
+    assert "Code signing policy</h2>" in page
+    assert "Free code signing provided by <a href=\"https://signpath.io/\">SignPath.io</a>, certificate by" in page
+    assert "will not transfer any information to other networked systems unless specifically requested" in page
+    # Its colours are the palette's and no others.
+    style = page.split("<style>")[1].split("</style>")[0]
+    known = set(palette.LIGHT.values()) | set(palette.DARK.values())
+    assert set(re.findall(r"#[0-9a-fA-F]{3,8}\b", style)) <= known
 
 
 @pytest.fixture(scope="module")
